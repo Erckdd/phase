@@ -54,9 +54,9 @@ use super::replacements::ReplacementEvent;
 use super::resolution::debug_assert_runtime_resolution_invariants;
 use super::resolution::{
     AbilityContinuationFrame, ChangeZoneFrame, ChildStackDepth, FrameGate, MultiDrawFrame,
-    OptionalEffectFrame, PendingCoinFlip, PendingMutateMerge, PendingProliferateActions,
-    RepeatedOptionalPaymentFrame, ResolutionFrame, ResolutionStack, ResolutionStackError,
-    ResolutionStateWire,
+    OptionalEffectFrame, PendingCoinFlip, PendingDieRoll, PendingDieRollInstruction,
+    PendingMutateMerge, PendingProliferateActions, RepeatedOptionalPaymentFrame, ResolutionFrame,
+    ResolutionStack, ResolutionStackError, ResolutionStateWire,
 };
 use super::resolved_commands::{
     ManaPaymentRecipient, ResolvedContinuousEffectCommand,
@@ -12704,6 +12704,33 @@ pub enum WaitingFor {
         results: Vec<bool>,
         keep_count: usize,
     },
+    /// CR 706.6 + CR 614.1a: A die-roll replacement ("instead roll that many dice
+    /// plus one and ignore the lowest roll" — Barbarian Class, Pixie Guide,
+    /// Wyll) rolled `results.len()` dice for one instruction, and the roller
+    /// must ignore `ignore_count` of them.
+    ///
+    /// `results` are the NATURAL results (CR 706.2 — before any modifier),
+    /// because CR 706.6 forbids any effect applying to an ignored roll.
+    /// `ignorable_indices` is engine-computed: for "ignore the lowest" it holds
+    /// exactly the indices tied for the lowest natural, which is CR 706.6's
+    /// second sentence ("if multiple results are tied for the lowest, the player
+    /// chooses one of those rolls to be ignored"). The frontend must NOT compute
+    /// which roll is lowest — it renders `results` and enables only
+    /// `ignorable_indices`.
+    ///
+    /// Engine convention, deliberately carrying no CR annotation: no
+    /// Comprehensive Rule states that die results are public information, so
+    /// there is no rule to cite here. This variant is absent from
+    /// `game/visibility.rs` — no per-player redaction, mirroring
+    /// `CoinFlipKeepChoice`.
+    DieKeepChoice {
+        /// CR 706.6: the player who rolled, who is the player instructed to
+        /// ignore and therefore the player who breaks a tie.
+        player: PlayerId,
+        results: Vec<u8>,
+        ignorable_indices: Vec<usize>,
+        ignore_count: usize,
+    },
     /// CR 701.20e: Waiting for the player to choose which looked-at cards to keep.
     DigChoice {
         /// Player who looks at the cards and makes any selection.
@@ -14889,6 +14916,7 @@ impl WaitingFor {
             WaitingFor::ArrangePlanarDeckTopChoice { .. } => "ArrangePlanarDeckTopChoice",
             WaitingFor::RedistributeLifeTotals { .. } => "RedistributeLifeTotals",
             WaitingFor::CoinFlipKeepChoice { .. } => "CoinFlipKeepChoice",
+            WaitingFor::DieKeepChoice { .. } => "DieKeepChoice",
             WaitingFor::DigChoice { .. } => "DigChoice",
             WaitingFor::SurveilChoice { .. } => "SurveilChoice",
             WaitingFor::RevealChoice { .. } => "RevealChoice",
@@ -15048,6 +15076,7 @@ impl WaitingFor {
             | WaitingFor::ArrangePlanarDeckTopChoice { player, .. }
             | WaitingFor::RedistributeLifeTotals { player, .. }
             | WaitingFor::CoinFlipKeepChoice { player, .. }
+            | WaitingFor::DieKeepChoice { player, .. }
             | WaitingFor::DigChoice { player, .. }
             | WaitingFor::SurveilChoice { player, .. }
             | WaitingFor::RevealChoice { player, .. }
@@ -18953,6 +18982,20 @@ declare_game_state! {
     /// CR 616.1: search-found replacement batch parked across a choice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_search_found_batch: Option<PendingSearchFoundBatch>,
+    /// CR 616.1 + CR 706.1: die-roll INSTRUCTION context parked across a
+    /// replacement-ordering choice, before any die has been rolled.
+    ///
+    /// Two applicable die-roll replacements (Barbarian Class + Pixie Guide) make
+    /// the affected player order them, which suspends `roll_die::resolve` on a
+    /// `ReplacementChoice`. The resolving ability is gone by the time the choice
+    /// is submitted, so the results table, modifier, and targets are parked here
+    /// and consumed by `roll_die::resume_roll_dice_after_replacement`. This is
+    /// deliberately NOT a `ResolutionStack` frame: the stack top during the
+    /// ordering choice belongs to the ability continuation, and a `DieRoll`
+    /// frame pushed over it would break the top-of-stack ownership checks that
+    /// `take_active_die_roll_frame` relies on for the CR 706.6 ignore choice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_die_roll_instruction: Option<Box<PendingDieRollInstruction>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub may_trigger_auto_choices: Vec<MayTriggerAutoChoiceRecord>,
 
@@ -21876,6 +21919,75 @@ impl GameState {
         self.resolution_stack.push_coin_flip(pending);
     }
 
+    /// CR 706.6: Parks one "ignore the lowest roll" resolution.
+    ///
+    /// The CR 706.6 ignore choice itself is raised ONCE per instruction — every
+    /// applied replacement's rule is folded into a single
+    /// `WaitingFor::DieKeepChoice` with an `ignore_count` — so this frame is
+    /// pushed once for that choice and consumed by
+    /// `take_active_die_roll_frame`.
+    ///
+    /// It is NOT the frame's whole lifecycle: past the ignore choice, a
+    /// results-table branch can suspend mid-loop on its own prompt
+    /// (CR 706.3a + CR 608.2c), and the owner is then re-parked by
+    /// `park_die_roll_frame_for_resume` to carry the remaining dice. See that
+    /// method for which stack slot each case parks into.
+    pub fn push_die_roll_frame(&mut self, pending: PendingDieRoll) {
+        self.resolution_stack.push_die_roll(pending);
+    }
+
+    /// CR 706.6: Consumes exactly the active die-roll frame when the roller
+    /// submits which roll(s) to ignore.
+    pub fn take_active_die_roll_frame(
+        &mut self,
+    ) -> Result<Option<PendingDieRoll>, ResolutionStackError> {
+        self.resolution_stack.take_active_die_roll()
+    }
+
+    /// CR 706.3a: Re-parks the active die-roll owner after a results branch
+    /// suspended mid-loop, so the remaining dice resume from the frame's cursor.
+    pub fn replace_active_die_roll_frame(
+        &mut self,
+        pending: PendingDieRoll,
+    ) -> Result<(), ResolutionStackError> {
+        self.resolution_stack.replace_active_die_roll(pending)
+    }
+
+    /// CR 706.3a + CR 608.2c: Parks the die-roll owner for a mid-loop resume,
+    /// choosing the structurally valid slot instead of assuming one.
+    ///
+    /// Three cases, and collapsing them is a stack-invariant bug:
+    ///
+    /// * the owner is already on top (this pass came from a keep choice) — swap
+    ///   it in place, keeping the stack top stable;
+    /// * the stack is empty (a first pass that never parked one) — push;
+    /// * something else owns the top. Past cursor 0 this frame is an
+    ///   `AfterChild` owner (see `ResolutionFrame::gate`), so a results-table
+    ///   branch that suspended on its OWN prompt is above us. Pushing there
+    ///   would bury that child's `DirectChoice`, which `validate` rejects
+    ///   (`buried_direct_choice`) because a direct-choice owner must be the top
+    ///   frame. Insert BELOW the active child instead — the frame waits on it,
+    ///   exactly like every other `AfterChild` owner.
+    pub fn park_die_roll_frame_for_resume(
+        &mut self,
+        pending: PendingDieRoll,
+    ) -> Result<(), ResolutionStackError> {
+        match self
+            .resolution_stack
+            .replace_active_die_roll(pending.clone())
+        {
+            Ok(()) => Ok(()),
+            Err(ResolutionStackError::Empty) => {
+                self.resolution_stack.push_die_roll(pending);
+                Ok(())
+            }
+            Err(ResolutionStackError::UnexpectedTop { .. }) => self
+                .resolution_stack
+                .insert_parent_of_active(ResolutionFrame::DieRoll(Box::new(pending))),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Re-parks the active coin-flip owner after it suspends for another keep
     /// choice.
     pub fn replace_active_coin_flip_frame(
@@ -23886,6 +23998,7 @@ impl GameState {
             pending_scoped_library_search: None,
             pending_library_search_delivery: None,
             pending_search_found_batch: None,
+            pending_die_roll_instruction: None,
             may_trigger_auto_choices: Vec::new(),
             decision_templates: Vec::new(),
             priority_yields: Vec::new(),
@@ -26142,6 +26255,7 @@ fn _gamestate_partition_is_total(s: &GameState) {
         pending_scoped_library_search: _,
         pending_library_search_delivery: _,
         pending_search_found_batch: _,
+        pending_die_roll_instruction: _,
         post_replacement_token_substitution_count: _,
         //   - `last_loop_action_sequence` (PR-7 Phase 4d-ii / P7 v3 object-growth loop-action
         //     sequence): EXCLUDED from `impl PartialEq for GameState` (a transient decision
@@ -26364,6 +26478,7 @@ impl PartialEq for GameState {
             && self.pending_scoped_library_search == other.pending_scoped_library_search
             && self.pending_library_search_delivery == other.pending_library_search_delivery
             && self.pending_search_found_batch == other.pending_search_found_batch
+            && self.pending_die_roll_instruction == other.pending_die_roll_instruction
             && self.pending_cost_move_resume == other.pending_cost_move_resume
             && self.pending_triggered_mana_resume == other.pending_triggered_mana_resume
             && self.pending_trigger_construction_priority_recipient
