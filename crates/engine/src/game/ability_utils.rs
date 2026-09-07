@@ -2768,6 +2768,42 @@ pub(crate) fn fight_subject_needs_target_slot(subject: &TargetFilter) -> bool {
     }
 }
 
+/// CR 115.1 + CR 601.2c: the `Effect::BecomeCopy` RECIPIENT filter that must be
+/// announced as its own target slot, or `None` when the recipient needs no
+/// announcement (`crate::types::ability::CopyRecipient::Source`, or an untargeted CR 611.2c set).
+///
+/// **Single authority.** Three consumers must agree exactly or the target
+/// machinery silently misbinds:
+///
+/// 1. `collect_target_slots_inner` — surfaces the cast-time slot.
+/// 2. `collect_target_slot_specs` — surfaces the matching per-slot spec. The
+///    two are mirrors with NO assertion linking them; divergence fails silently
+///    as misaligned `TargetInstanceId`s.
+/// 3. `game::effects::become_copy::resolve` — reads
+///    [`become_copy_copy_source_target_index`] to know which declared object
+///    target is the copy SOURCE rather than the recipient.
+///
+/// The recipient is declared FIRST because it is printed first ("**Target
+/// artifact you control** becomes a copy of **a second target artifact you
+/// control**" — Shuri, Wakandan Inventor), and CR 601.2c declares targets in
+/// the order written.
+pub(crate) fn become_copy_recipient_slot_filter(effect: &Effect) -> Option<&TargetFilter> {
+    match effect {
+        Effect::BecomeCopy { recipient, .. } => recipient.announced_filter(),
+        _ => None,
+    }
+}
+
+/// CR 115.1: index into an ability's declared OBJECT targets at which the
+/// `BecomeCopy` copy source lives.
+///
+/// `0` for the incumbent single-target shape; `1` when the recipient claimed
+/// slot 0 via [`become_copy_recipient_slot_filter`]. Derived from that same
+/// function so the resolver's index mapping cannot drift from the slot builder.
+pub(crate) fn become_copy_copy_source_target_index(effect: &Effect) -> usize {
+    usize::from(become_copy_recipient_slot_filter(effect).is_some())
+}
+
 /// Legal targets for the companion `TargetFilter::Player` slot — the player
 /// whose permanents a `ControllerRef::TargetPlayer` ("that player controls")
 /// filter scopes to. Single authority shared by the static slot build
@@ -3383,6 +3419,31 @@ fn collect_target_slots_inner(
                 effect_kind: acc.current_effect_kind,
                 effect_detail: acc.current_effect_detail,
             });
+        }
+        // CR 115.1 + CR 601.2c: a `BecomeCopy` whose RECIPIENT is itself an
+        // announced target ("Target artifact you control becomes a copy of a
+        // second target artifact you control" — Shuri) declares that recipient
+        // BEFORE the copy source, matching printed order. Surfaced here, ahead
+        // of the generic `extract_target_filter_from_effect` slot below (which
+        // yields the copy SOURCE), so the two slots land in declaration order.
+        // The generic path is left completely untouched, preserving
+        // `optional_targeting` / `multi_target` / graveyard-and-exile choice
+        // behaviour for every incumbent self-copy card.
+        if ability.target_choice_timing == TargetChoiceTiming::Stack {
+            if let Some(filter) = become_copy_recipient_slot_filter(&ability.effect) {
+                let legal_targets =
+                    legal_targets_for_ability_filter(state, ability, filter, &acc.slots);
+                if legal_targets.is_empty() && !ability.optional_targeting {
+                    return Err(no_legal_target_slots());
+                }
+                acc.push(TargetSelectionSlot {
+                    legal_targets,
+                    optional: ability.optional_targeting,
+                    chooser: None,
+                    effect_kind: acc.current_effect_kind,
+                    effect_detail: acc.current_effect_detail,
+                });
+            }
         }
         if ability.target_choice_timing == TargetChoiceTiming::Stack
             && !effect_target_filter_references_chosen_player(&ability.effect)
@@ -5727,6 +5788,31 @@ fn collect_target_slot_specs(
                 instance: id,
             });
         }
+        // CR 115.1 + CR 601.2c: EXACT MIRROR of the `BecomeCopy` recipient slot
+        // in `collect_target_slots_inner` — same gate, same position ahead of
+        // the generic copy-source slot below. NO assertion links spec order to
+        // slot order, so a divergence here fails silently as misaligned
+        // `TargetInstanceId`s.
+        //
+        // CR 115.3: the recipient gets its OWN `TargetInstanceId` because it is
+        // a SEPARATE instance of the word "target" ("Target artifact you
+        // control … a second target artifact you control"). Per CR 115.3 the
+        // same object may be chosen once for EACH instance, so this is
+        // deliberately NOT a distinctness constraint: Shuri may legally answer
+        // both slots with the same artifact (a no-op self-copy). Sharing one
+        // instance across the two slots — the "up to N targets" idiom below —
+        // would wrongly forbid that.
+        if ability.target_choice_timing == TargetChoiceTiming::Stack {
+            if let Some(filter) = become_copy_recipient_slot_filter(&ability.effect) {
+                let id = TargetInstanceId(*next_instance);
+                *next_instance += 1;
+                specs.push(TargetSlotSpec {
+                    filter: filter.clone(),
+                    optional: ability.optional_targeting,
+                    instance: id,
+                });
+            }
+        }
         if ability.target_choice_timing == TargetChoiceTiming::Stack {
             if let Some(filter) = triggers::extract_target_filter_from_effect(&ability.effect) {
                 if let Some(spec) = ability.multi_target.as_ref() {
@@ -7852,6 +7938,29 @@ fn assign_targets_recursive(
             ));
         }
     }
+    // CR 115.1 + CR 601.2c: Mirror the `BecomeCopy` recipient slot pushed by
+    // `collect_target_slots`, at the SAME position in this ladder — after the
+    // companion/quantity/combat-relation slots and immediately before the
+    // generic copy-source consumption below. Position parity is what makes
+    // `targets[0]` the recipient and `targets[1]` the copy source, the exact
+    // order `become_copy::resolve` reads via
+    // `become_copy_copy_source_target_index`. (No `BecomeCopy` co-occurs with
+    // those three companion slots today — its copy-source filter never
+    // references `ControllerRef::TargetPlayer`, and it is neither a fight nor a
+    // quantity effect — so this is order-preserving now and stays correct if one
+    // ever does.)
+    if ability.target_choice_timing == TargetChoiceTiming::Stack
+        && become_copy_recipient_slot_filter(&ability.effect).is_some()
+    {
+        if let Some(target) = targets.get(*next_target) {
+            ability.targets.push(target.clone());
+            *next_target += 1;
+        } else if !ability.optional_targeting {
+            return Err(EngineError::InvalidAction(
+                "Missing required target".to_string(),
+            ));
+        }
+    }
     if ability.target_choice_timing == TargetChoiceTiming::Stack
         && triggers::extract_target_filter_from_effect(&ability.effect).is_some()
     {
@@ -8239,6 +8348,33 @@ fn assign_selected_slots_recursive(
     }
     if ability.target_choice_timing == TargetChoiceTiming::Stack
         && effect_needs_parent_target_combat_relation_slot(&ability.effect)
+    {
+        let Some(selected_slot) = selected_slots.get(*next_slot) else {
+            return Err(EngineError::InvalidAction(
+                "Missing target selection".to_string(),
+            ));
+        };
+        match selected_slot {
+            Some(target) => ability.targets.push(target.clone()),
+            None if ability.optional_targeting => {}
+            None => {
+                return Err(EngineError::InvalidAction(
+                    "Missing required target".to_string(),
+                ));
+            }
+        }
+        *next_slot += 1;
+    }
+    // CR 115.1 + CR 601.2c: Mirror the `BecomeCopy` recipient slot for the
+    // ONE-SLOT-AT-A-TIME `ChooseTarget` walk (the path every AI game and the
+    // scenario driver take), at the SAME position in this ladder as in
+    // `collect_target_slots_inner` — after the companion/quantity/combat-relation
+    // slots and immediately before the generic copy-source consumption below.
+    // Position parity is what makes `targets[0]` the recipient and `targets[1]`
+    // the copy source, the order `become_copy::resolve` reads via
+    // `become_copy_copy_source_target_index`.
+    if ability.target_choice_timing == TargetChoiceTiming::Stack
+        && become_copy_recipient_slot_filter(&ability.effect).is_some()
     {
         let Some(selected_slot) = selected_slots.get(*next_slot) else {
             return Err(EngineError::InvalidAction(
@@ -8678,6 +8814,17 @@ fn chain_has_target_sink(ability: &ResolvedAbility) -> bool {
     // target into this node BEFORE descending into the (modal) sub-chain.
     if ability.target_choice_timing == TargetChoiceTiming::Stack
         && prevent_damage_source_slot_filter(&ability.effect).is_some()
+    {
+        return true;
+    }
+
+    // CR 115.1 + CR 601.2c: A `BecomeCopy` with an announced recipient consumes
+    // TWO targets into its own node (recipient, then copy source), so it is a
+    // sink on the same footing as the `PreventDamage` head above. Without this,
+    // the blanket early return in `assign_selected_slots_in_chain` flattens both
+    // chosen targets onto the root and the recipient/copy-source split is lost.
+    if ability.target_choice_timing == TargetChoiceTiming::Stack
+        && become_copy_recipient_slot_filter(&ability.effect).is_some()
     {
         return true;
     }

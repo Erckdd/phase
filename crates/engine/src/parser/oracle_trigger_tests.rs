@@ -511,7 +511,7 @@ fn becomes_target_delayed_become_copy_payload_fails_honestly() {
         AbilityKind::Spell,
         Effect::BecomeCopy {
             target: TargetFilter::EventTarget,
-            recipient: TargetFilter::SelfRef,
+            recipient: crate::types::ability::CopyRecipient::Source,
             duration: None,
             mana_value_limit: None,
             additional_modifications: Vec::new(),

@@ -2414,9 +2414,10 @@ fn apply_duration_to_effect(effect: &mut Effect, duration: &Duration) {
                         filter: TargetFilter::AttachedTo,
                     },
                 }
-            ) && *recipient == TargetFilter::SelfRef
+            ) && copy_recipient_is_attachment_host_anaphor(recipient)
             {
-                *recipient = TargetFilter::AttachedTo;
+                *recipient =
+                    crate::types::ability::CopyRecipient::Untargeted(TargetFilter::AttachedTo);
             }
             // CR 611.2a: yield to an explicitly written window, same rule as the
             // siblings above. `become_copy::resolve` reads this field FIRST, so an
@@ -2435,6 +2436,46 @@ fn apply_duration_to_effect(effect: &mut Effect, duration: &Duration) {
     } else if let Some(fragment) = unevaluable_lifetime {
         *effect = Effect::unimplemented("cast_from_zone_unevaluable_lifetime", fragment);
     }
+}
+
+/// CR 611.2b + CR 301.5: does this `BecomeCopy` recipient anaphorically name the
+/// permanent the source is attached to?
+///
+/// Only meaningful under the attachment window
+/// `ForAsLongAs { RecipientMatchesFilter { AttachedTo } }`, which is the sole
+/// caller. Assimilation Aegis is the canonical print: *"Whenever this Equipment
+/// becomes attached to a creature, for as long as this Equipment remains
+/// attached to it, **that creature** becomes a copy of a creature card exiled
+/// with this Equipment."* Under that window "that creature" IS the attached
+/// host, so the recipient is rewritten to `AttachedTo` and the copy follows the
+/// host across re-attachment.
+///
+/// Members:
+/// - `Source` — the elided/self-framed spelling, and the incumbent shape this
+///   rewrite has always fired on.
+/// - `Untargeted(TriggeringSource)` — "that creature", the creature named by the
+///   becomes-attached trigger. This is what the subject parser now yields; it
+///   previously reached here as `Source` only because the singular become-copy
+///   arm discarded its subject entirely.
+/// - `Untargeted(ParentTarget)` — the sibling anaphor spelling, admitted so a
+///   reworded print of the same class does not silently fall out.
+///
+/// Deliberately EXCLUDED:
+/// - `Target(..)` — a declared target names its own announced object (CR 115.1);
+///   rewriting it would silently retarget a player's choice onto the host.
+/// - `Untargeted(<concrete population>)` — e.g. `Typed(Creature, You)`, which
+///   already names a real set and must not collapse to a single host.
+fn copy_recipient_is_attachment_host_anaphor(
+    recipient: &crate::types::ability::CopyRecipient,
+) -> bool {
+    use crate::types::ability::CopyRecipient;
+    matches!(
+        recipient,
+        CopyRecipient::Source
+            | CopyRecipient::Untargeted(
+                TargetFilter::TriggeringSource | TargetFilter::ParentTarget
+            )
+    )
 }
 
 /// CR 611.2a: a stated duration governs the lifetime of the effect it
@@ -3091,7 +3132,7 @@ mod duration_distribution_tests_7923 {
     fn become_copy(duration: Option<Duration>) -> Effect {
         Effect::BecomeCopy {
             target: TargetFilter::Any,
-            recipient: TargetFilter::SelfRef,
+            recipient: crate::types::ability::CopyRecipient::Source,
             duration,
             mana_value_limit: None,
             additional_modifications: Vec::new(),
@@ -3502,7 +3543,7 @@ mod duration_distribution_tests_7923 {
             } => {
                 assert_eq!(
                     recipient,
-                    TargetFilter::AttachedTo,
+                    crate::types::ability::CopyRecipient::Untargeted(TargetFilter::AttachedTo),
                     "CR 611.2b rewrite fires"
                 );
                 assert_eq!(
@@ -3524,7 +3565,7 @@ mod duration_distribution_tests_7923 {
             } => {
                 assert_eq!(
                     recipient,
-                    TargetFilter::AttachedTo,
+                    crate::types::ability::CopyRecipient::Untargeted(TargetFilter::AttachedTo),
                     "the CR 611.2b attachment rewrite is UNCONDITIONAL — moving the guard onto \
                      the match arm silently drops it"
                 );
@@ -3547,7 +3588,7 @@ mod duration_distribution_tests_7923 {
             } => {
                 assert_eq!(
                     recipient,
-                    TargetFilter::SelfRef,
+                    crate::types::ability::CopyRecipient::Source,
                     "no attachment window, no rewrite"
                 );
                 assert_eq!(duration, Some(Duration::UntilEndOfCombat));

@@ -10836,7 +10836,7 @@ mod tests {
             AbilityKind::Spell,
             Effect::BecomeCopy {
                 target: TargetFilter::Any,
-                recipient: TargetFilter::SelfRef,
+                recipient: crate::types::ability::CopyRecipient::Source,
                 duration: None,
                 mana_value_limit: None,
                 additional_modifications: vec![ContinuousModification::GrantTrigger {

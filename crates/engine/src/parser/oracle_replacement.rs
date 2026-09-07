@@ -1404,7 +1404,7 @@ fn parse_as_enters_exile_from_graveyards(
         crate::types::ability::AbilityKind::Spell,
         crate::types::ability::Effect::BecomeCopy {
             target: crate::types::ability::TargetFilter::ExiledCardByIndex { index: 0 },
-            recipient: crate::types::ability::TargetFilter::SelfRef,
+            recipient: crate::types::ability::CopyRecipient::Source,
             duration: None,
             mana_value_limit: None,
             additional_modifications: vec![],
@@ -3203,7 +3203,7 @@ fn parse_clone_replacement(
         AbilityKind::Spell,
         Effect::BecomeCopy {
             target: filter,
-            recipient: TargetFilter::SelfRef,
+            recipient: crate::types::ability::CopyRecipient::Source,
             duration,
             mana_value_limit,
             additional_modifications,
@@ -7318,7 +7318,7 @@ pub(crate) fn parse_oneshot_enter_as_copy_replacement(norm_lower: &str) -> Optio
             AbilityKind::Spell,
             Effect::BecomeCopy {
                 target: TargetFilter::ParentTarget,
-                recipient: TargetFilter::SelfRef,
+                recipient: crate::types::ability::CopyRecipient::Source,
                 duration: None,
                 mana_value_limit: None,
                 additional_modifications: Vec::new(),
@@ -25723,7 +25723,7 @@ mod snapshot_tests {
             TargetFilter::ParentTarget,
             "the chosen creature is frozen when the shield is installed"
         );
-        assert_eq!(*recipient, TargetFilter::SelfRef);
+        assert_eq!(*recipient, crate::types::ability::CopyRecipient::Source);
     }
 
     #[test]
@@ -25766,7 +25766,7 @@ mod snapshot_tests {
                 &*execute.effect,
                 Effect::BecomeCopy {
                     target: TargetFilter::ParentTarget,
-                    recipient: TargetFilter::SelfRef,
+                    recipient: crate::types::ability::CopyRecipient::Source,
                     ..
                 }
             ),

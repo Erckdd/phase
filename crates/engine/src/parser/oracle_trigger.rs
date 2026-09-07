@@ -2675,7 +2675,9 @@ fn effect_contains_event_target(effect: &Effect) -> bool {
             target, recipient, ..
         } => {
             target_filter_contains_event_target(target)
-                || target_filter_contains_event_target(recipient)
+                || recipient
+                    .filter()
+                    .is_some_and(target_filter_contains_event_target)
         }
         Effect::CopyTokenOf {
             target,
