@@ -6371,33 +6371,54 @@ fn parse_opponent_controls_target_condition(lower: &str) -> Option<AbilityCondit
         .map(|(_, c)| c)
 }
 
-/// CR 111.1 + CR 608.2c: "the token is a/an <type>" — the token created by the
-/// immediately-preceding `Effect::Token`/`CopyTokenOf` matches `<type>` (Yenna,
-/// Redtooth Regent: "Create a token that's a copy of it ... If the token is an
-/// Aura, untap ~, then scry 2"). Represented as an existential over
-/// `And([LastCreated, <type>])`: `LastCreated` reads `state.last_created_token_ids`,
-/// so the count is 1 exactly when the just-created token matches the type. This is
-/// the field-expressive form — a bare `TargetMatchesFilter{LastCreated}` would test
-/// the ability's chosen target (the copied enchantment), not the created token.
+/// CR 111.1 + CR 608.2c: "the token is[n't] a/an <type>" — the token created by
+/// the immediately-preceding `Effect::Token`/`CopyTokenOf` matches (or fails to
+/// match) `<type>` (Yenna, Redtooth Regent: "Create a token that's a copy of it
+/// ... If the token is an Aura, untap ~, then scry 2"; Ultron, Artificial
+/// Malevolence: "create a token that's a copy of it. If the token isn't a
+/// creature, it becomes a 2/2 Robot Villain creature ..."). Represented as an
+/// existential over `And([LastCreated, <type>])`: `LastCreated` reads
+/// `state.last_created_token_ids`, so the count is 1 exactly when the
+/// just-created token matches the type. This is the field-expressive form — a
+/// bare `TargetMatchesFilter{LastCreated}` would test the ability's chosen target
+/// (the copied permanent), not the created token.
+///
+/// Polarity is a leaf parameterization of the same copula, not a sibling
+/// recognizer: the negated spellings wrap the identical existential in `Not`.
+/// The negated tags are tried FIRST because `"the token is "` is a proper prefix
+/// of `"the token is not "` and would otherwise consume it, leaving an
+/// unparseable `"not a creature"` tail.
 fn parse_the_token_is_type_condition(lower: &str) -> Option<AbilityCondition> {
-    let (rest, _) = tag::<_, _, OracleError<'_>>("the token is ")
-        .parse(lower)
-        .ok()?;
+    let (rest, negated) = alt((
+        value(
+            true,
+            alt((
+                tag::<_, _, OracleError<'_>>("the token isn't "),
+                tag("the token is not "),
+            )),
+        ),
+        value(false, tag("the token is ")),
+    ))
+    .parse(lower)
+    .ok()?;
     let (filter, remainder) = parse_type_phrase_folding(rest);
     if !matches!(filter, TargetFilter::Typed(_)) || !remainder.trim().is_empty() {
         return None;
     }
-    Some(AbilityCondition::QuantityCheck {
-        lhs: QuantityExpr::Ref {
-            qty: QuantityRef::ObjectCount {
-                filter: TargetFilter::And {
-                    filters: vec![TargetFilter::LastCreated, filter],
+    Some(maybe_negate(
+        AbilityCondition::QuantityCheck {
+            lhs: QuantityExpr::Ref {
+                qty: QuantityRef::ObjectCount {
+                    filter: TargetFilter::And {
+                        filters: vec![TargetFilter::LastCreated, filter],
+                    },
                 },
             },
+            comparator: Comparator::GE,
+            rhs: QuantityExpr::Fixed { value: 1 },
         },
-        comparator: Comparator::GE,
-        rhs: QuantityExpr::Fixed { value: 1 },
-    })
+        negated,
+    ))
 }
 
 /// CR 109.4 + CR 608.2c: Recognize a leading **inverse** anaphoric-control
@@ -9062,6 +9083,80 @@ mod tests {
             Some(AbilityCondition::Not { condition })
                 if matches!(*condition, AbilityCondition::SourceMatchesFilter { .. })
         ));
+    }
+
+    /// CR 111.1 + CR 608.2c: the "the token is[n't] a <type>" gate is
+    /// parameterized over polarity, not duplicated per spelling. Affirmative is
+    /// Yenna, Redtooth Regent ("If the token is an Aura, untap ~, then scry 2");
+    /// the negated spellings are Ultron, Artificial Malevolence ("If the token
+    /// isn't a creature, it becomes a 2/2 Robot Villain creature in addition to
+    /// its other types"). Both read `LastCreated`, so the copy just minted by the
+    /// preceding `CopyTokenOf` is the subject — not the ability's chosen target.
+    #[test]
+    fn the_token_is_type_gate_covers_both_polarities() {
+        let existential = |filter: TargetFilter| AbilityCondition::QuantityCheck {
+            lhs: QuantityExpr::Ref {
+                qty: QuantityRef::ObjectCount {
+                    filter: TargetFilter::And {
+                        filters: vec![TargetFilter::LastCreated, filter],
+                    },
+                },
+            },
+            comparator: Comparator::GE,
+            rhs: QuantityExpr::Fixed { value: 1 },
+        };
+        let creature = TargetFilter::Typed(TypedFilter::new(TypeFilter::Creature));
+
+        assert_eq!(
+            try_nom_condition_as_ability_condition(
+                "the token is a creature",
+                &mut ParseContext::default()
+            ),
+            Some(existential(creature.clone()))
+        );
+        for negated in ["the token isn't a creature", "the token is not a creature"] {
+            assert_eq!(
+                try_nom_condition_as_ability_condition(negated, &mut ParseContext::default()),
+                Some(AbilityCondition::Not {
+                    condition: Box::new(existential(creature.clone()))
+                }),
+                "negated spelling {negated:?} must wrap the SAME existential in Not"
+            );
+        }
+    }
+
+    /// Issue #4763 — Ultron, Artificial Malevolence. The negated token gate must
+    /// survive the leading-conditional split; when it is dropped the 2/2 Robot
+    /// Villain override runs unconditionally and overwrites the P/T of a copy
+    /// that was already an artifact creature.
+    #[test]
+    fn leading_the_token_isnt_a_creature_gates_the_becomes_clause() {
+        let (condition, body) = strip_leading_general_conditional(
+            "If the token isn't a creature, it becomes a 2/2 Robot Villain creature in addition \
+             to its other types.",
+            &mut ParseContext::default(),
+        );
+        assert_eq!(
+            body,
+            "it becomes a 2/2 Robot Villain creature in addition to its other types."
+        );
+        let Some(AbilityCondition::Not { condition }) = condition else {
+            panic!("expected a negated token-type gate, got {condition:?}");
+        };
+        assert!(
+            matches!(
+                *condition,
+                AbilityCondition::QuantityCheck {
+                    lhs: QuantityExpr::Ref {
+                        qty: QuantityRef::ObjectCount {
+                            filter: TargetFilter::And { ref filters }
+                        }
+                    },
+                    ..
+                } if filters.contains(&TargetFilter::LastCreated)
+            ),
+            "gate must count the just-created token, got {condition:?}"
+        );
     }
 
     /// CR 120.3 + CR 608.2c: The Black Arrow — "If a Dragon is dealt damage this
