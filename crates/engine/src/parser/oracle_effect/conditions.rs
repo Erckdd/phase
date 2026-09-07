@@ -25,8 +25,10 @@ use super::super::oracle_target::{
     AnaphorZoneClass,
 };
 use super::super::oracle_util::{parse_comparison_suffix, parse_subtype, TextPair};
+#[cfg(test)]
+use super::parse_effect_chain;
 use super::sequence::parse_dig_from_among;
-use super::{parse_effect_chain, scan_contains_phrase, ParseContext};
+use super::{scan_contains_phrase, ParseContext};
 use crate::parser::oracle_ir::ast::{parsed_clause, ContinuationAst};
 use crate::parser::oracle_ir::diagnostic::OracleDiagnostic;
 use crate::parser::oracle_ir::effect_chain::{
@@ -4121,11 +4123,19 @@ pub(super) fn try_parse_generic_instead_clause(
     text: &str,
     kind: AbilityKind,
     ctx: &mut ParseContext,
+    parent_target_available: bool,
 ) -> InsteadLowering {
     // Forward form: "If <cond>, [body] instead." — split on the leading "If, "
     // and strip a trailing/leading "instead" from the body.
     if let Some((cond_text, effect_text, order)) = split_forward_instead_clause(text) {
-        return build_instead_def(cond_text, effect_text, kind, ctx, order);
+        return build_instead_def(
+            cond_text,
+            effect_text,
+            kind,
+            ctx,
+            parent_target_available,
+            order,
+        );
     }
 
     // CR 614.1a + CR 608.2c: Inverted form — "[body] instead if <cond>." (e.g.
@@ -4139,6 +4149,7 @@ pub(super) fn try_parse_generic_instead_clause(
             effect_text,
             kind,
             ctx,
+            parent_target_available,
             InsteadClauseOrder::Inverted,
         );
     }
@@ -4266,6 +4277,7 @@ fn build_instead_def(
     effect_text: String,
     kind: AbilityKind,
     ctx: &mut ParseContext,
+    parent_target_available: bool,
     order: InsteadClauseOrder,
 ) -> InsteadLowering {
     // CR 608.2c: An additional-cost-paid "instead" fold ("if it/this spell was
@@ -4306,7 +4318,8 @@ fn build_instead_def(
         };
     };
 
-    let instead_def = parse_effect_chain(&effect_text, kind);
+    let instead_def =
+        super::parse_child_ability_with_parent_target(&effect_text, kind, parent_target_available);
     let mut result = instead_def;
     result.condition = Some(AbilityCondition::ConditionInstead {
         inner: Box::new(condition),
@@ -11153,6 +11166,7 @@ mod tests {
             "If it entered from your library or was cast from your library, draw two cards instead.",
             AbilityKind::Spell,
             &mut ParseContext::default(),
+            false,
         ) else {
             panic!("instead clause must lower to a conditional branch");
         };

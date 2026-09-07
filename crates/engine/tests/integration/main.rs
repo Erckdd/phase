@@ -294,6 +294,7 @@ mod finality_counter_death_to_exile;
 mod fire_lord_ozai_each_opponent_library_top;
 mod fireball_x_cost_surcharge_timing;
 mod first_family_union_color_count;
+mod flare_of_faith_parent_target;
 mod flashback_nonmana_payability;
 mod flickerwisp_delayed_return;
 mod floodpits_drowner;

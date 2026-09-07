@@ -17509,6 +17509,157 @@ fn conditional_protection_grant_routes_through_ability_ir() {
     assert!(def.sub_ability.is_none());
 }
 
+const FIVE_COLOR_PROTECTION_BODY: &str = "It gains protection from white if you control a Plains, from blue if you control an Island, from black if you control a Swamp, from red if you control a Mountain, and from green if you control a Forest.";
+
+fn assert_five_color_protection_on(def: &AbilityDefinition, affected: TargetFilter) {
+    use crate::types::keywords::{Keyword, ProtectionTarget};
+    use crate::types::mana::ManaColor;
+
+    let Effect::GenericEffect {
+        static_abilities, ..
+    } = def.effect.as_ref()
+    else {
+        panic!("expected protection GenericEffect, got {:?}", def.effect);
+    };
+    assert_eq!(static_abilities.len(), 5);
+    let granted: Vec<_> = static_abilities
+        .iter()
+        .map(|ability| {
+            assert_eq!(ability.affected, Some(affected.clone()));
+            let [ContinuousModification::AddKeyword {
+                keyword: Keyword::Protection(color),
+            }] = ability.modifications.as_slice()
+            else {
+                panic!(
+                    "expected one protection grant, got {:?}",
+                    ability.modifications
+                );
+            };
+            color.clone()
+        })
+        .collect();
+    assert_eq!(
+        granted,
+        vec![
+            ProtectionTarget::Color(ManaColor::White),
+            ProtectionTarget::Color(ManaColor::Blue),
+            ProtectionTarget::Color(ManaColor::Black),
+            ProtectionTarget::Color(ManaColor::Red),
+            ProtectionTarget::Color(ManaColor::Green),
+        ]
+    );
+}
+
+#[test]
+fn flare_of_faith_binds_its_instead_body_to_the_selected_creature() {
+    let def = parse_effect_chain(
+        "Target creature gets +2/+2 until end of turn. If it's a Human, instead it gets +3/+3 and gains indestructible until end of turn.",
+        AbilityKind::Spell,
+    );
+    let Effect::Pump {
+        power,
+        toughness,
+        target: TargetFilter::Typed(target),
+    } = def.effect.as_ref()
+    else {
+        panic!("expected targeted root pump, got {:?}", def.effect);
+    };
+    assert!(target.type_filters.contains(&TypeFilter::Creature));
+    assert_eq!(*power, PtValue::Fixed(2));
+    assert_eq!(*toughness, PtValue::Fixed(2));
+
+    let instead = def
+        .sub_ability
+        .as_ref()
+        .unwrap_or_else(|| panic!("expected Human instead branch, got {def:?}"));
+    let Some(AbilityCondition::ConditionInstead { inner }) = instead.condition.as_ref() else {
+        panic!(
+            "expected ConditionInstead Human gate, got {:?}",
+            instead.condition
+        );
+    };
+    let AbilityCondition::TargetMatchesFilter {
+        filter: TargetFilter::Typed(filter),
+        ..
+    } = inner.as_ref()
+    else {
+        panic!("expected Human target filter, got {inner:?}");
+    };
+    assert!(filter
+        .type_filters
+        .contains(&TypeFilter::Subtype("Human".to_string())));
+    let Effect::GenericEffect {
+        static_abilities, ..
+    } = instead.effect.as_ref()
+    else {
+        panic!(
+            "expected ParentTarget Human override, got {:?}",
+            instead.effect
+        );
+    };
+    assert!(static_abilities.iter().any(|ability| {
+        ability.affected == Some(TargetFilter::ParentTarget)
+            && ability
+                .modifications
+                .contains(&ContinuousModification::AddPower { value: 3 })
+            && ability
+                .modifications
+                .contains(&ContinuousModification::AddToughness { value: 3 })
+            && ability
+                .modifications
+                .contains(&ContinuousModification::AddKeyword {
+                    keyword: Keyword::Indestructible,
+                })
+    }));
+}
+
+#[test]
+fn generic_instead_child_uses_the_standalone_protection_recognizer_with_parent_target() {
+    let def = parse_effect_chain(
+        &format!(
+            "Target creature gets +2/+2. If it's a Human, instead {FIVE_COLOR_PROTECTION_BODY}"
+        ),
+        AbilityKind::Spell,
+    );
+    let instead = def
+        .sub_ability
+        .as_ref()
+        .expect("expected generic instead branch");
+    assert_five_color_protection_on(instead, TargetFilter::ParentTarget);
+}
+
+#[test]
+fn standalone_protection_body_keeps_self_reference_without_a_parent_target() {
+    let def = parse_effect_chain(FIVE_COLOR_PROTECTION_BODY, AbilityKind::Spell);
+    assert_five_color_protection_on(&def, TargetFilter::SelfRef);
+}
+
+#[test]
+fn standalone_protection_bypass_isolates_outer_context_except_parent_target() {
+    let mut outer_ctx = ParseContext {
+        subject: Some(TargetFilter::SelfRef),
+        actor: Some(ControllerRef::Opponent),
+        current_trigger_index: Some(3),
+        in_trigger: true,
+        parent_target_available: true,
+        ..ParseContext::default()
+    };
+    let original_ctx = outer_ctx.clone();
+
+    let def = lower_ability_ir(&parse_ability_ir(
+        FIVE_COLOR_PROTECTION_BODY,
+        AbilityKind::Spell,
+        ChainLoweringMode::Standalone,
+        &mut outer_ctx,
+    ));
+
+    assert_five_color_protection_on(&def, TargetFilter::ParentTarget);
+    assert_eq!(
+        outer_ctx, original_ctx,
+        "standalone bypass must not mutate its caller"
+    );
+}
+
 /// The extracted keyword-word → kind combinator (deduplicated with the static
 /// `each … has <kw>` clause) recognizes every graveyard-cast keyword.
 #[test]
