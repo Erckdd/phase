@@ -36,6 +36,100 @@ fn assert_tracked_mana_value_source(def: &AbilityDefinition, expected: TrackedAn
     ));
 }
 
+fn assert_attachment_chain_has_no_unimplemented(def: &AbilityDefinition) {
+    let mut current = Some(def);
+    while let Some(ability) = current {
+        assert!(
+            !matches!(ability.effect.as_ref(), Effect::Unimplemented { .. }),
+            "attachment chain must lower every clause: {def:#?}"
+        );
+        current = ability.sub_ability.as_deref();
+    }
+}
+
+fn assert_grip_of_phyresis_chain(text: &str) {
+    let parsed = parse_oracle_text(
+        text,
+        "Typed Attachment Probe",
+        &[],
+        &["Instant".to_string()],
+        &[],
+    );
+    assert_eq!(
+        parsed.abilities.len(),
+        1,
+        "one spell chain expected: {text}"
+    );
+    let root = parsed.abilities.first().expect("spell ability");
+    assert_attachment_chain_has_no_unimplemented(root);
+    let Effect::GainControl {
+        target: TargetFilter::Typed(filter),
+    } = root.effect.as_ref()
+    else {
+        panic!(
+            "chain must first gain control of target Equipment: {:?}",
+            root.effect
+        );
+    };
+    assert_eq!(filter.get_subtype(), Some("Equipment"));
+    assert_eq!(
+        filter,
+        &TypedFilter::default().subtype("Equipment".to_string()),
+        "Gain control must keep the exact target Equipment filter: {text}"
+    );
+    let token = root
+        .sub_ability
+        .as_deref()
+        .expect("Germ token follows control");
+    let Effect::Token {
+        name,
+        power: PtValue::Fixed(0),
+        toughness: PtValue::Fixed(0),
+        colors,
+        types,
+        ..
+    } = token.effect.as_ref()
+    else {
+        panic!(
+            "chain must create a 0/0 black Phyrexian Germ: {:?}",
+            token.effect
+        );
+    };
+    assert_eq!(name, "Phyrexian Germ");
+    assert_eq!(colors, &vec![crate::types::mana::ManaColor::Black]);
+    assert_eq!(
+        types,
+        &vec![
+            "Creature".to_string(),
+            "Phyrexian".to_string(),
+            "Germ".to_string(),
+        ]
+    );
+    let attach = token
+        .sub_ability
+        .as_deref()
+        .expect("Attach follows Germ token");
+    assert_eq!(
+        attach.effect.as_ref(),
+        &Effect::Attach {
+            attachment: TargetFilter::ParentTarget,
+            target: TargetFilter::LastCreated,
+        },
+        "attachment and recipient provenance must be exact: {text}"
+    );
+    assert!(
+        attach.sub_ability.is_none(),
+        "Attach must be the chain tail: {text}"
+    );
+}
+
+#[test]
+fn grip_of_phyresis_exact_oracle_lowers_gain_control_token_attach_chain() {
+    assert_grip_of_phyresis_chain(
+        "Gain control of target Equipment, then create a 0/0 black Phyrexian Germ creature token and attach that Equipment to it.",
+    );
+}
+
 fn nested_batch_aggregate() -> PropertyAggregate {
     PropertyAggregate::new(
         AggregateFunction::Sum,
