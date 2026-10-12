@@ -1344,6 +1344,7 @@ mod scoped_unless_sacrifice_token;
 mod screaming_nemesis_combat_damage_multi_trigger;
 mod screaming_nemesis_life_lock;
 mod scroll_of_fate_manifest_from_hand;
+mod scroll_rack_linked_exile;
 mod scythecat_cub_second_resolution;
 mod search_delivery_observer_dedup;
 mod season_points_budget_modal;
