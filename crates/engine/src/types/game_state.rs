@@ -9224,6 +9224,33 @@ fn visit_mana_ability_resume_events(
 }
 
 impl ManaAbilityResume {
+    /// CR 601.2g + CR 605.3b: Whether resuming this root continues an automatic
+    /// payment that suspended while auto-tap was paying it, rather than opening
+    /// a prompt or starting a fresh payment. Exhaustive so a new root has to be
+    /// classified. Auto-tap plans the remainder of such a payment with every
+    /// row (see `casting_costs::AutoTapRowPolicy`).
+    pub fn resumes_automatic_payment(&self) -> bool {
+        match self {
+            // The outer cost authority retries the same automatic payment after
+            // an auto-tapped source's paused cost move completed.
+            ManaAbilityResume::CompanionToHand { .. }
+            | ManaAbilityResume::TurnFaceUp { .. }
+            | ManaAbilityResume::EndContinuousEffect { .. }
+            | ManaAbilityResume::EffectPayCost { .. }
+            | ManaAbilityResume::PhyrexianCastPayment { .. }
+            | ManaAbilityResume::FinalizePendingManaPayment { .. } => true,
+            // CR 605.3a + CR 602.2b: a mana ability activated by hand retries
+            // its own activation; its automatic payment starts there, fresh.
+            ManaAbilityResume::ManaAbilityManaPayment { .. } => false,
+            // These return to a player's prompt or to priority; no automatic
+            // payment is in progress.
+            ManaAbilityResume::Priority
+            | ManaAbilityResume::ManaPayment { .. }
+            | ManaAbilityResume::ManaSourceSelection { .. }
+            | ManaAbilityResume::UnlessPayment { .. } => false,
+        }
+    }
+
     /// CR 601.2h + CR 602.2b + CR 116.2: Whether the outer payment root this
     /// resumes is a cast, activation or special action (no priority until it
     /// completes) rather than a resolution. Exhaustive so a new root has to be
@@ -21079,6 +21106,16 @@ declare_game_state! {
     /// inside that synchronous window; it is never serialized.
     #[serde(skip)]
     pub active_spend_only_on_x_count: Option<(ObjectId, u32)>,
+    /// CR 601.2g + CR 605.3b: the row policy of the automatic mana payment that
+    /// is executing (see `casting_costs::AutoTapRowPolicy`). Set while a
+    /// payment activates its selected sources, and to `AllRows` while a
+    /// suspended payment resumes, so every auto-tap inside that payment plans
+    /// under one policy.
+    /// `None` outside those synchronous windows; never serialized and never part
+    /// of state equality.
+    #[serde(skip)]
+    pub(crate) active_auto_tap_row_policy:
+        Option<crate::game::casting_costs::AutoTapRowPolicy>,
 
     // Shared zones
     pub battlefield: im::Vector<ObjectId>,
@@ -29104,6 +29141,7 @@ impl GameState {
             active_casting_permission_index: None,
             active_paid_resolution_offer_tail: None,
             active_spend_only_on_x_count: None,
+            active_auto_tap_row_policy: None,
             battlefield: im::Vector::new(),
             stack: im::Vector::new(),
             stack_paid_facts: HashMap::new(),
@@ -30494,6 +30532,7 @@ impl GameState {
         // monotone source of fresh IDs is normalized for recurrence checks.
         clone.next_return_result_occurrence_id = 0;
         clone.active_paid_resolution_offer_tail = None;
+        clone.active_auto_tap_row_policy = None;
         // CR 104.4b: pip-id counter is a volatile monotonic field; zero it (like
         // next_object_id) so two otherwise-identical loop states compare equal.
         clone.next_pip_id = 0;
@@ -32098,6 +32137,7 @@ fn _gamestate_partition_is_total(s: &GameState) {
         active_casting_permission_index: _,
         active_paid_resolution_offer_tail: _,
         active_spend_only_on_x_count: _,
+        active_auto_tap_row_policy: _,
         battlefield: _,
         stack: _,
         stack_paid_facts: _,
@@ -47652,8 +47692,14 @@ mod tests {
         let mut state = GameState::new_two_player(7);
         state.active_casting_permission_index = Some(CastingPermissionIndex(42));
         state.active_spend_only_on_x_count = Some((ObjectId(123), 5));
+        state.active_auto_tap_row_policy =
+            Some(crate::game::casting_costs::AutoTapRowPolicy::AllRows);
 
         let serialized = serde_json::to_string(&state).expect("state must serialize");
+        assert!(
+            !serialized.contains("active_auto_tap_row_policy"),
+            "active_auto_tap_row_policy must be skipped by serde: {serialized}"
+        );
         assert!(
             !serialized.contains("active_casting_permission_index"),
             "active_casting_permission_index must be skipped by serde: {serialized}"
@@ -47672,6 +47718,10 @@ mod tests {
         assert_eq!(
             deserialized.active_spend_only_on_x_count, None,
             "deserialized active_spend_only_on_x_count must be None"
+        );
+        assert_eq!(
+            deserialized.active_auto_tap_row_policy, None,
+            "deserialized active_auto_tap_row_policy must be None"
         );
     }
 }
