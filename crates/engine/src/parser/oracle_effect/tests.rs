@@ -65596,6 +65596,7 @@ fn prop_has_chosen_color(p: &FilterProp) -> bool {
         | FilterProp::Untapped
         | FilterProp::IsSaddled
         | FilterProp::SaddledSource
+        | FilterProp::CrewedThisTurn { .. }
         | FilterProp::ConvokedSource
         | FilterProp::ProtectorMatches { .. }
         | FilterProp::HasHasteOrControlledSinceTurnBegan
