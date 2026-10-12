@@ -10860,6 +10860,94 @@ pub fn parse_zone_changed_this_way_clause(
     parse_zone_changed_this_way_clause_scoped(input, ThisWayVerbScope::AnyZoneChange)
 }
 
+/// CR 603.12 + CR 603.12a: what a "… this way" head names — the zone-change
+/// verb of the event, and whether the head counts one occurrence ("a card")
+/// or the aggregate ("one or more cards"). Parse-time metadata only; the
+/// lowered condition is still `ZoneChangedThisWay`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThisWayHead {
+    pub verb: ThisWayVerb,
+    pub occurrence: ThisWayOccurrence,
+}
+
+/// The zone-change verb a "… this way" head names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThisWayVerb {
+    /// CR 701.13a: exile moves an object to the exile zone from wherever it is.
+    Exile,
+    /// CR 701.9a: discard moves a card from its owner's hand to their graveyard.
+    Discard,
+    /// CR 701.21a: sacrifice moves a permanent from the battlefield to its
+    /// owner's graveyard.
+    Sacrifice,
+    /// CR 701.17a: mill puts cards from the top of a library into the graveyard.
+    Mill,
+    /// "put onto the battlefield" / "enters"
+    EnterBattlefield,
+    /// "put into your graveyard" (CR 701.25a: surveil puts any number of the
+    /// looked-at cards into the graveyard).
+    PutIntoGraveyard,
+    /// CR 701.8a: destroy moves a permanent from the battlefield to its owner's
+    /// graveyard.
+    Destroy,
+    /// "returned"
+    Return,
+    /// CR 701.6a: counter removes a spell or ability from the stack.
+    Counter,
+    /// CR 700.4: "dies" means put into a graveyard from the battlefield.
+    Die,
+}
+
+/// How many occurrences of the event a "… this way" head counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThisWayOccurrence {
+    /// "a"/"an" — one occurrence (CR 603.12a: a reflexive triggers once for
+    /// each time its event occurred). Passive subjects also take "that" and
+    /// "another"; active "you <verb>" heads don't (see
+    /// `parse_active_this_way_quantifier`).
+    Single,
+    /// "one or more"/"at least one"/"any number of" — the event as a whole.
+    Aggregate,
+}
+
+/// The quantifier of a "… this way" subject. "another " is peeked, not
+/// consumed (`parse_type_phrase_folding` maps it to `FilterProp::Another`).
+fn parse_this_way_quantifier(input: &str) -> OracleResult<'_, ThisWayOccurrence> {
+    alt((
+        value(
+            ThisWayOccurrence::Aggregate,
+            tag::<_, _, OracleError<'_>>("at least one "),
+        ),
+        value(ThisWayOccurrence::Aggregate, tag("one or more ")),
+        value(
+            ThisWayOccurrence::Single,
+            nom::combinator::peek(tag("another ")),
+        ),
+        value(ThisWayOccurrence::Single, tag("that ")),
+        value(ThisWayOccurrence::Single, parse_article),
+    ))
+    .parse(input)
+}
+
+/// The quantifier of an active-voice "you <verb> ... this way" head ("you
+/// discard a card", "you exile one or more cards"). Shared by every active head
+/// so its arms can't drift apart. Unlike the passive subject
+/// ([`parse_this_way_quantifier`]), active heads deliberately admit neither
+/// "that" nor "another": "you discard that card this way" and "you exile
+/// another card this way" don't occur on printed cards, so both stay
+/// unrecognized rather than guessed.
+fn parse_active_this_way_quantifier(input: &str) -> OracleResult<'_, ThisWayOccurrence> {
+    alt((
+        value(
+            ThisWayOccurrence::Aggregate,
+            tag::<_, _, OracleError<'_>>("at least one "),
+        ),
+        value(ThisWayOccurrence::Aggregate, tag("one or more ")),
+        value(ThisWayOccurrence::Single, parse_article),
+    ))
+    .parse(input)
+}
+
 /// CR 400.7 + CR 608.2c: which zone-change verbs a "… this way" back-reference
 /// may name. A typed scope rather than a `bool` so the axis stays self-documenting
 /// and extensible (per the "never a raw bool" rule); it parameterizes *only* the
@@ -10883,26 +10971,33 @@ pub fn parse_zone_changed_this_way_clause_scoped(
     input: &str,
     scope: ThisWayVerbScope,
 ) -> OracleResult<'_, (TargetFilter, bool, Option<crate::types::zones::Zone>)> {
+    let (rest, (filter, negated, destination, _head)) =
+        parse_zone_changed_this_way_head_scoped(input, scope)?;
+    Ok((rest, (filter, negated, destination)))
+}
+
+/// [`parse_zone_changed_this_way_clause_scoped`] plus the head's typed
+/// [`ThisWayHead`] (verb and occurrence).
+pub fn parse_zone_changed_this_way_head_scoped(
+    input: &str,
+    scope: ThisWayVerbScope,
+) -> OracleResult<
+    '_,
+    (
+        TargetFilter,
+        bool,
+        Option<crate::types::zones::Zone>,
+        ThisWayHead,
+    ),
+> {
     // CR 608.2c: A "this way" conditional may be quantified. "at least one" /
     // "one or more" both mean "≥ 1", which the existential `.any()` semantics
-    // of `ZoneChangedThisWay` already encode — they value-discard to unit. The
-    // bare article "a"/"an" is the singular existential form. All collapse to
-    // the same existential condition.
-    let (rest, _) = alt((
-        value((), tag::<_, _, OracleError<'_>>("at least one ")),
-        value((), tag("one or more ")),
-        // CR 608.2c: "another <type> … this way" (Arid Archway) — do NOT consume
-        // "another "; `parse_type_phrase_folding` maps it to `FilterProp::Another` so the
-        // returned-this-way subject excludes the source.
-        value((), nom::combinator::peek(tag("another "))),
-        // CR 608.2c: "that <type> … this way" (Saw in Half, Tuktuk Scrapper) —
-        // the anaphor names the parent's own moved object; the ledger holds
-        // exactly the parent's moves, so the existential over it is the same
-        // condition the article forms produce.
-        value((), tag("that ")),
-        parse_article,
-    ))
-    .parse(input)?;
+    // of `ZoneChangedThisWay` already encode. The bare article "a"/"an" is the
+    // singular form, as are "another <type>" (Arid Archway — not consumed, so
+    // `parse_type_phrase_folding` maps it to `FilterProp::Another`) and "that
+    // <type>" (Saw in Half, Tuktuk Scrapper — the anaphor names the parent's
+    // own moved object). The occurrence axis is kept as typed head metadata.
+    let (rest, occurrence) = parse_this_way_quantifier(input)?;
 
     // type phrase — handled by the shared helper which already covers
     // top-level types (creature, artifact, enchantment, …) and subtypes
@@ -10935,7 +11030,11 @@ pub fn parse_zone_changed_this_way_clause_scoped(
         alt((tag::<_, _, OracleError<'_>>("enters"), tag("enter"))).parse(after_filter)
     {
         let (rest, _) = tag(" this way").parse(rest)?;
-        return Ok((rest, (filter, false, Some(Zone::Battlefield))));
+        let head = ThisWayHead {
+            verb: ThisWayVerb::EnterBattlefield,
+            occurrence,
+        };
+        return Ok((rest, (filter, false, Some(Zone::Battlefield), head)));
     }
 
     // CR 700.4: "dies this way" — present-tense and DESTINATION-BOUND: dying
@@ -10947,9 +11046,18 @@ pub fn parse_zone_changed_this_way_clause_scoped(
             alt((tag::<_, _, OracleError<'_>>("dies"), tag("die"))).parse(after_filter)
         {
             let (rest, _) = tag(" this way").parse(rest)?;
+            let head = ThisWayHead {
+                verb: ThisWayVerb::Die,
+                occurrence,
+            };
             return Ok((
                 rest,
-                (filter, false, Some(crate::types::zones::Zone::Graveyard)),
+                (
+                    filter,
+                    false,
+                    Some(crate::types::zones::Zone::Graveyard),
+                    head,
+                ),
             ));
         }
     }
@@ -10971,45 +11079,45 @@ pub fn parse_zone_changed_this_way_clause_scoped(
     .parse(after_filter)?;
 
     // verb-phrase: single-word imperatives + the multi-word
-    // "put onto the battlefield". The verb itself is value-discarded; the
-    // " this way" suffix is the discriminator. Under
-    // `ThisWayVerbScope::BattlefieldEntry` only the battlefield-entry verb is
-    // offered; the non-entry zone-change verbs are withheld.
-    let (rest, destination) = match scope {
+    // "put onto the battlefield", each with its destination and typed verb.
+    // Under `ThisWayVerbScope::BattlefieldEntry` only the battlefield-entry
+    // verb is offered; the non-entry zone-change verbs are withheld.
+    let (rest, (destination, verb)) = match scope {
         ThisWayVerbScope::AnyZoneChange => alt((
             // CR 608.2c + CR 614.6: "put onto the battlefield" names the
             // arrival, so a replacement that redirects the object elsewhere
             // defeats the clause.
             value(
-                Some(Zone::Battlefield),
+                (Some(Zone::Battlefield), ThisWayVerb::EnterBattlefield),
                 tag::<_, _, OracleError<'_>>("put onto the battlefield"),
             ),
-            value(None, tag("destroyed")),
-            value(None, tag("exiled")),
-            value(None, tag("sacrificed")),
-            value(None, tag("returned")),
-            value(None, tag("discarded")),
-            value(None, tag("milled")),
-            value(None, tag("countered")),
+            value((None, ThisWayVerb::Destroy), tag("destroyed")),
+            value((None, ThisWayVerb::Exile), tag("exiled")),
+            value((None, ThisWayVerb::Sacrifice), tag("sacrificed")),
+            value((None, ThisWayVerb::Return), tag("returned")),
+            value((None, ThisWayVerb::Discard), tag("discarded")),
+            value((None, ThisWayVerb::Mill), tag("milled")),
+            value((None, ThisWayVerb::Counter), tag("countered")),
             // CR 608.2c + CR 122.1h + CR 614.6: destination-bound wording —
             // the clause names the ARRIVAL zone, so a replacement that
             // redirects the object elsewhere (finality counters: exile
             // instead of the graveyard) defeats it.
             value(
-                Some(crate::types::zones::Zone::Graveyard),
+                (Some(crate::types::zones::Zone::Graveyard), ThisWayVerb::Die),
                 tag("put into a graveyard"),
             ),
         ))
         .parse(rest)?,
         ThisWayVerbScope::BattlefieldEntry => value(
-            Some(Zone::Battlefield),
+            (Some(Zone::Battlefield), ThisWayVerb::EnterBattlefield),
             tag::<_, _, OracleError<'_>>("put onto the battlefield"),
         )
         .parse(rest)?,
     };
 
     let (rest, _) = tag(" this way").parse(rest)?;
-    Ok((rest, (filter, negated, destination)))
+    let head = ThisWayHead { verb, occurrence };
+    Ok((rest, (filter, negated, destination, head)))
 }
 
 /// CR 120.3 + CR 608.2c: the recipient axis of a "… is dealt damage this way"
@@ -11290,13 +11398,16 @@ pub fn parse_conditional_entry_this_way_rider(input: &str) -> OracleResult<'_, (
 pub fn parse_you_put_onto_battlefield_this_way_clause(
     input: &str,
 ) -> OracleResult<'_, (TargetFilter, bool)> {
+    let (rest, (filter, negated, _head)) = parse_you_put_onto_battlefield_this_way_head(input)?;
+    Ok((rest, (filter, negated)))
+}
+
+/// The same head, plus its typed [`ThisWayHead`].
+pub fn parse_you_put_onto_battlefield_this_way_head(
+    input: &str,
+) -> OracleResult<'_, (TargetFilter, bool, ThisWayHead)> {
     let (rest, _) = tag("you put ").parse(input)?;
-    let (rest, _) = alt((
-        value((), tag::<_, _, OracleError<'_>>("at least one ")),
-        value((), tag("one or more ")),
-        parse_article,
-    ))
-    .parse(rest)?;
+    let (rest, occurrence) = parse_active_this_way_quantifier(rest)?;
     let (filter, after_filter) = parse_type_phrase_folding(rest);
     if matches!(filter, TargetFilter::Any) {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -11306,7 +11417,17 @@ pub fn parse_you_put_onto_battlefield_this_way_clause(
     }
     let after_filter = after_filter.trim_start();
     let (rest, _) = tag("onto the battlefield this way").parse(after_filter)?;
-    Ok((rest, (filter, false)))
+    Ok((
+        rest,
+        (
+            filter,
+            false,
+            ThisWayHead {
+                verb: ThisWayVerb::EnterBattlefield,
+                occurrence,
+            },
+        ),
+    ))
 }
 
 /// CR 608.2c + CR 701.25a: Parse "you put [quantifier] [type] into your
@@ -11331,13 +11452,16 @@ pub fn parse_you_put_onto_battlefield_this_way_clause(
 pub fn parse_you_put_into_graveyard_this_way_clause(
     input: &str,
 ) -> OracleResult<'_, (TargetFilter, bool)> {
+    let (rest, (filter, negated, _head)) = parse_you_put_into_graveyard_this_way_head(input)?;
+    Ok((rest, (filter, negated)))
+}
+
+/// The same head, plus its typed [`ThisWayHead`].
+pub fn parse_you_put_into_graveyard_this_way_head(
+    input: &str,
+) -> OracleResult<'_, (TargetFilter, bool, ThisWayHead)> {
     let (rest, _) = tag("you put ").parse(input)?;
-    let (rest, _) = alt((
-        value((), tag::<_, _, OracleError<'_>>("at least one ")),
-        value((), tag("one or more ")),
-        parse_article,
-    ))
-    .parse(rest)?;
+    let (rest, occurrence) = parse_active_this_way_quantifier(rest)?;
     let (filter, after_filter) = parse_type_phrase_folding(rest);
     if matches!(filter, TargetFilter::Any) {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -11347,7 +11471,17 @@ pub fn parse_you_put_into_graveyard_this_way_clause(
     }
     let after_filter = after_filter.trim_start();
     let (rest, _) = tag("into your graveyard this way").parse(after_filter)?;
-    Ok((rest, (filter, false)))
+    Ok((
+        rest,
+        (
+            filter,
+            false,
+            ThisWayHead {
+                verb: ThisWayVerb::PutIntoGraveyard,
+                occurrence,
+            },
+        ),
+    ))
 }
 
 /// CR 701.9a: Parse "you discard [quantifier] [type] card[s] this way" — the
@@ -11371,13 +11505,16 @@ pub fn parse_you_put_into_graveyard_this_way_clause(
 /// way. A leading type qualifier ("a creature card") narrows the filter via the
 /// shared `parse_type_phrase_folding` helper, covering the whole class.
 pub fn parse_you_discard_this_way_clause(input: &str) -> OracleResult<'_, (TargetFilter, bool)> {
+    let (rest, (filter, negated, _head)) = parse_you_discard_this_way_head(input)?;
+    Ok((rest, (filter, negated)))
+}
+
+/// The same head, plus its typed [`ThisWayHead`].
+pub fn parse_you_discard_this_way_head(
+    input: &str,
+) -> OracleResult<'_, (TargetFilter, bool, ThisWayHead)> {
     let (rest, _) = tag("you discard ").parse(input)?;
-    let (rest, _) = alt((
-        value((), tag::<_, _, OracleError<'_>>("at least one ")),
-        value((), tag("one or more ")),
-        parse_article,
-    ))
-    .parse(rest)?;
+    let (rest, occurrence) = parse_active_this_way_quantifier(rest)?;
     let (filter, after_filter) = parse_type_phrase_folding(rest);
     if matches!(filter, TargetFilter::Any) {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -11387,7 +11524,17 @@ pub fn parse_you_discard_this_way_clause(input: &str) -> OracleResult<'_, (Targe
     }
     let after_filter = after_filter.trim_start();
     let (rest, _) = tag("this way").parse(after_filter)?;
-    Ok((rest, (filter, false)))
+    Ok((
+        rest,
+        (
+            filter,
+            false,
+            ThisWayHead {
+                verb: ThisWayVerb::Discard,
+                occurrence,
+            },
+        ),
+    ))
 }
 
 /// CR 701.21a: Parse "you sacrifice [quantifier] [type] this way" — the
@@ -11404,12 +11551,23 @@ pub fn parse_you_discard_this_way_clause(input: &str) -> OracleResult<'_, (Targe
 /// trailing plural "s" lets "one or more artifacts" / "an artifact" / "a creature"
 /// all narrow through the shared `parse_type_phrase_folding` helper, covering the class.
 pub fn parse_you_sacrifice_this_way_clause(input: &str) -> OracleResult<'_, (TargetFilter, bool)> {
+    let (rest, (filter, negated, _head)) = parse_you_sacrifice_this_way_head(input)?;
+    Ok((rest, (filter, negated)))
+}
+
+/// The same head, plus its typed [`ThisWayHead`].
+pub fn parse_you_sacrifice_this_way_head(
+    input: &str,
+) -> OracleResult<'_, (TargetFilter, bool, ThisWayHead)> {
     let (rest, _) = tag("you sacrifice ").parse(input)?;
-    let (rest, _) = alt((
-        value((), tag::<_, _, OracleError<'_>>("at least one ")),
-        value((), tag("one or more ")),
-        value((), tag("any number of ")),
-        parse_article,
+    // "you sacrifice any number of artifacts": the one active head whose
+    // producer ("Sacrifice any number of ...") also takes this quantifier.
+    let (rest, occurrence) = alt((
+        value(
+            ThisWayOccurrence::Aggregate,
+            tag::<_, _, OracleError<'_>>("any number of "),
+        ),
+        parse_active_this_way_quantifier,
     ))
     .parse(rest)?;
     let (filter, after_filter) = parse_type_phrase_folding(rest);
@@ -11421,7 +11579,17 @@ pub fn parse_you_sacrifice_this_way_clause(input: &str) -> OracleResult<'_, (Tar
     }
     let after_filter = after_filter.trim_start();
     let (rest, _) = tag("this way").parse(after_filter)?;
-    Ok((rest, (filter, false)))
+    Ok((
+        rest,
+        (
+            filter,
+            false,
+            ThisWayHead {
+                verb: ThisWayVerb::Sacrifice,
+                occurrence,
+            },
+        ),
+    ))
 }
 
 /// CR 608.2c + CR 701.16a: Parse "you exile[d] [quantifier] [type] this way"
@@ -11439,15 +11607,18 @@ pub fn parse_you_sacrifice_this_way_clause(input: &str) -> OracleResult<'_, (Tar
 /// and its exile-zone destination — unlike those two, exile's destination is
 /// not fixed to the graveyard, so no destination is implied here.
 pub fn parse_you_exile_this_way_clause(input: &str) -> OracleResult<'_, (TargetFilter, bool)> {
+    let (rest, (filter, negated, _head)) = parse_you_exile_this_way_head(input)?;
+    Ok((rest, (filter, negated)))
+}
+
+/// The same head, plus its typed [`ThisWayHead`].
+pub fn parse_you_exile_this_way_head(
+    input: &str,
+) -> OracleResult<'_, (TargetFilter, bool, ThisWayHead)> {
     let (rest, _) = tag("you exile").parse(input)?;
     let (rest, _) = opt(tag("d")).parse(rest)?;
     let (rest, _) = tag(" ").parse(rest)?;
-    let (rest, _) = alt((
-        value((), tag::<_, _, OracleError<'_>>("at least one ")),
-        value((), tag("one or more ")),
-        parse_article,
-    ))
-    .parse(rest)?;
+    let (rest, occurrence) = parse_active_this_way_quantifier(rest)?;
     let (filter, after_filter) = parse_type_phrase_folding(rest);
     if matches!(filter, TargetFilter::Any) {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -11457,7 +11628,17 @@ pub fn parse_you_exile_this_way_clause(input: &str) -> OracleResult<'_, (TargetF
     }
     let after_filter = after_filter.trim_start();
     let (rest, _) = tag("this way").parse(after_filter)?;
-    Ok((rest, (filter, false)))
+    Ok((
+        rest,
+        (
+            filter,
+            false,
+            ThisWayHead {
+                verb: ThisWayVerb::Exile,
+                occurrence,
+            },
+        ),
+    ))
 }
 
 /// CR 608.2c + CR 205: Fold trailing " or <article/another> <type>" segments that
@@ -12055,6 +12236,65 @@ mod tests {
     /// CR 701.21a: the active-voice sacrifice condition
     /// ("you sacrifice [quantifier] [type] this way") parses to its filter for
     /// every quantifier form, mirroring the discard/put combinators.
+    #[test]
+    fn this_way_heads_report_their_verb_and_occurrence() {
+        let active = [
+            (
+                parse_you_exile_this_way_head("you exile a card this way, x"),
+                ThisWayVerb::Exile,
+                ThisWayOccurrence::Single,
+            ),
+            (
+                parse_you_discard_this_way_head("you discard one or more cards this way, x"),
+                ThisWayVerb::Discard,
+                ThisWayOccurrence::Aggregate,
+            ),
+            (
+                parse_you_sacrifice_this_way_head("you sacrifice any number of artifacts this way"),
+                ThisWayVerb::Sacrifice,
+                ThisWayOccurrence::Aggregate,
+            ),
+            (
+                parse_you_put_onto_battlefield_this_way_head(
+                    "you put one or more equipment onto the battlefield this way",
+                ),
+                ThisWayVerb::EnterBattlefield,
+                ThisWayOccurrence::Aggregate,
+            ),
+        ];
+        for (parsed, verb, occurrence) in active {
+            let (_, (_, _, head)) = parsed.expect("active head parses");
+            assert_eq!(head, ThisWayHead { verb, occurrence });
+        }
+        for (input, verb, occurrence) in [
+            (
+                "a creature card is exiled this way, x",
+                ThisWayVerb::Exile,
+                ThisWayOccurrence::Single,
+            ),
+            (
+                "one or more cards are milled this way, x",
+                ThisWayVerb::Mill,
+                ThisWayOccurrence::Aggregate,
+            ),
+            (
+                "an equipment enters this way, x",
+                ThisWayVerb::EnterBattlefield,
+                ThisWayOccurrence::Single,
+            ),
+            (
+                "that creature dies this way, x",
+                ThisWayVerb::Die,
+                ThisWayOccurrence::Single,
+            ),
+        ] {
+            let (_, (_, _, _, head)) =
+                parse_zone_changed_this_way_head_scoped(input, ThisWayVerbScope::AnyZoneChange)
+                    .expect(input);
+            assert_eq!(head, ThisWayHead { verb, occurrence }, "{input}");
+        }
+    }
+
     #[test]
     fn parse_you_sacrifice_this_way_clause_quantifier_variants() {
         for input in [
