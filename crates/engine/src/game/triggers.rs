@@ -2123,31 +2123,39 @@ fn reconcile_off_zone_keyword_triggers(state: &mut GameState) {
         .into_iter()
         .flat_map(|zone| super::targeting::zone_object_ids(state, zone))
         .collect::<Vec<_>>();
-    let mut staged = Vec::with_capacity(object_ids.len());
+    // The read loop only observes `state`, so every object's keyword query
+    // shares one gather; the write-back below runs after the scope has ended.
+    let staged = {
+        let state = &*state;
+        crate::game::off_zone_characteristics::with_off_zone_keyword_scope(state, || {
+            let mut staged = Vec::with_capacity(object_ids.len());
 
-    for object_id in object_ids {
-        let Some(obj) = state.objects.get(&object_id) else {
-            continue;
-        };
-        let candidates = off_zone_keyword_trigger_candidates(state, obj);
-        let mut occurrence_state = obj.trigger_occurrence_state.clone();
-        let entries = occurrence_state
-            .reconcile_trigger_entries_matching(candidates, is_keyword_companion_producer)
-            .expect("off-zone keyword producers must be distinct and allocator capacity checked");
-        let mut trigger_definitions = obj
-            .trigger_definitions
-            .iter_all()
-            .filter(|entry| {
-                !matches!(
-                    entry.occurrence,
-                    TriggerDefinitionOccurrenceRef::KeywordCompanion { .. }
-                )
-            })
-            .cloned()
-            .collect::<Vec<TriggerEntry>>();
-        trigger_definitions.extend(entries);
-        staged.push((object_id, occurrence_state, trigger_definitions));
-    }
+            for object_id in object_ids {
+                let Some(obj) = state.objects.get(&object_id) else {
+                    continue;
+                };
+                let candidates = off_zone_keyword_trigger_candidates(state, obj);
+                let mut occurrence_state = obj.trigger_occurrence_state.clone();
+                let entries = occurrence_state
+                    .reconcile_trigger_entries_matching(candidates, is_keyword_companion_producer)
+                    .expect("off-zone keyword producers must be distinct and allocator capacity checked");
+                let mut trigger_definitions = obj
+                    .trigger_definitions
+                    .iter_all()
+                    .filter(|entry| {
+                        !matches!(
+                            entry.occurrence,
+                            TriggerDefinitionOccurrenceRef::KeywordCompanion { .. }
+                        )
+                    })
+                    .cloned()
+                    .collect::<Vec<TriggerEntry>>();
+                trigger_definitions.extend(entries);
+                staged.push((object_id, occurrence_state, trigger_definitions));
+            }
+            staged
+        })
+    };
 
     for (object_id, occurrence_state, trigger_definitions) in staged {
         let obj = state
@@ -3274,16 +3282,25 @@ fn collect_matching_triggers_inner(
     pending
 }
 
+/// Lists the objects in `zone` that may be the source of a trigger at the
+/// collector's current observation boundary.
+///
+/// The graveyard scan asks every graveyard card for its off-zone keywords
+/// against one unchanged state, so it shares one keyword gather.
 fn trigger_source_ids_for_zone(state: &GameState, zone: Zone) -> Vec<ObjectId> {
     match zone {
         // CR 702.26b: Phased-out permanents don't trigger.
         Zone::Battlefield => state.battlefield_phased_in_ids(),
-        Zone::Graveyard => state
-            .players
-            .iter()
-            .flat_map(|player| player.graveyard.iter().copied())
-            .filter(|id| source_has_trigger_in_zone(state, *id, zone))
-            .collect(),
+        Zone::Graveyard => {
+            crate::game::off_zone_characteristics::with_off_zone_keyword_scope(state, || {
+                state
+                    .players
+                    .iter()
+                    .flat_map(|player| player.graveyard.iter().copied())
+                    .filter(|id| source_has_trigger_in_zone(state, *id, zone))
+                    .collect()
+            })
+        }
         Zone::Exile => state.exile.iter().copied().collect(),
         Zone::Stack => state
             .stack
@@ -43303,6 +43320,165 @@ pub mod tests {
             first, regranted,
             "an off-zone producer reappearing after retirement receives a fresh generation"
         );
+    }
+
+    /// A battlefield permanent whose statics grant Recover to `recover` and
+    /// Suspend to `suspend`. No transient and no granted static is involved, so
+    /// the off-zone keyword gather is structural.
+    fn grant_off_zone_trigger_keywords(
+        state: &mut GameState,
+        recover: Option<ObjectId>,
+        suspend: Option<ObjectId>,
+    ) {
+        let source = make_creature(state, PlayerId(0), "Keyword Granter", 1, 1);
+        let grants = [
+            recover.map(|id| (id, Keyword::Recover(ManaCost::generic(1)))),
+            suspend.map(|id| {
+                (
+                    id,
+                    Keyword::Suspend {
+                        count: 0,
+                        cost: ManaCost::generic(1),
+                    },
+                )
+            }),
+        ];
+        for (id, keyword) in grants.into_iter().flatten() {
+            state
+                .objects
+                .get_mut(&source)
+                .unwrap()
+                .static_definitions
+                .push(
+                    StaticDefinition::continuous()
+                        .affected(TargetFilter::SpecificObject { id })
+                        .modifications(vec![ContinuousModification::AddKeyword { keyword }]),
+                );
+        }
+    }
+
+    /// Creates player 0's "Off-Zone Card {index}" in `zone` with card id `8300 + index`.
+    fn off_zone_test_card(state: &mut GameState, index: u64, zone: Zone) -> ObjectId {
+        create_object(
+            state,
+            CardId(8300 + index),
+            PlayerId(0),
+            format!("Off-Zone Card {index}"),
+            zone,
+        )
+    }
+
+    /// The graveyard trigger-source scan fills the keyword scope once and matches per-id results.
+    #[test]
+    fn graveyard_trigger_scan_shares_one_keyword_gather() {
+        use crate::game::off_zone_characteristics::{
+            off_zone_keyword_scope_counts, off_zone_keyword_scope_depth,
+            reset_off_zone_keyword_scope_counts,
+        };
+
+        let mut state = setup();
+        let cards = [
+            off_zone_test_card(&mut state, 0, Zone::Graveyard),
+            off_zone_test_card(&mut state, 1, Zone::Graveyard),
+            off_zone_test_card(&mut state, 2, Zone::Graveyard),
+        ];
+        grant_off_zone_trigger_keywords(&mut state, Some(cards[1]), None);
+
+        // Each id on its own, outside any scope.
+        let expected: Vec<ObjectId> = cards
+            .into_iter()
+            .filter(|id| source_has_trigger_in_zone(&state, *id, Zone::Graveyard))
+            .collect();
+        assert_eq!(
+            expected,
+            vec![cards[1]],
+            "reach-guard: only the card granted Recover is a graveyard trigger source"
+        );
+
+        reset_off_zone_keyword_scope_counts();
+        let scanned = trigger_source_ids_for_zone(&state, Zone::Graveyard);
+        let counts = off_zone_keyword_scope_counts();
+        assert!(counts.matched >= 3, "reach-guard: {counts:?}");
+        assert_eq!(counts.fills, 1, "{counts:?}");
+        assert_eq!(counts.hits, counts.matched - 1, "{counts:?}");
+        assert_eq!(off_zone_keyword_scope_depth(), 0);
+        assert_eq!(scanned, expected);
+    }
+
+    /// Off-zone trigger reconciliation fills the keyword scope once and matches unscoped results.
+    #[test]
+    fn reconcile_shares_one_keyword_gather() {
+        use crate::game::off_zone_characteristics::{
+            off_zone_keyword_scope_counts, off_zone_keyword_scope_depth,
+            reset_off_zone_keyword_scope_counts,
+        };
+
+        /// The `Debug` rendering of each of `obj`'s `KeywordCompanion` trigger entries.
+        fn keyword_companion_entries(obj: &GameObject) -> Vec<String> {
+            obj.trigger_definitions
+                .iter_all()
+                .filter(|entry| {
+                    matches!(
+                        entry.occurrence,
+                        TriggerDefinitionOccurrenceRef::KeywordCompanion { .. }
+                    )
+                })
+                .map(|entry| format!("{entry:?}"))
+                .collect()
+        }
+
+        let mut state = setup();
+        let cards = [
+            off_zone_test_card(&mut state, 0, Zone::Graveyard),
+            off_zone_test_card(&mut state, 1, Zone::Graveyard),
+            off_zone_test_card(&mut state, 2, Zone::Exile),
+            off_zone_test_card(&mut state, 3, Zone::Exile),
+        ];
+        grant_off_zone_trigger_keywords(&mut state, Some(cards[0]), Some(cards[2]));
+
+        // The reference: each object's candidates computed outside any scope and
+        // reconciled against a clone of its own occurrence state.
+        let reference = state.clone();
+        let expected: Vec<(Vec<String>, String)> = cards
+            .iter()
+            .map(|id| {
+                let obj = &reference.objects[id];
+                let candidates = off_zone_keyword_trigger_candidates(&reference, obj);
+                let mut occurrence_state = obj.trigger_occurrence_state.clone();
+                let entries = occurrence_state
+                    .reconcile_trigger_entries_matching(candidates, is_keyword_companion_producer)
+                    .expect("reference reconciliation must allocate");
+                (
+                    entries.iter().map(|entry| format!("{entry:?}")).collect(),
+                    format!("{occurrence_state:?}"),
+                )
+            })
+            .collect();
+        assert!(
+            !expected[0].0.is_empty() && !expected[2].0.is_empty(),
+            "reach-guard: the graveyard and exile grants each produce a keyword-companion entry"
+        );
+        assert!(expected[1].0.is_empty() && expected[3].0.is_empty());
+
+        reset_off_zone_keyword_scope_counts();
+        reconcile_off_zone_keyword_triggers(&mut state);
+        let counts = off_zone_keyword_scope_counts();
+        assert!(counts.matched >= 3, "reach-guard: {counts:?}");
+        assert_eq!(counts.fills, 1, "{counts:?}");
+        assert_eq!(counts.hits, counts.matched - 1, "{counts:?}");
+        assert_eq!(off_zone_keyword_scope_depth(), 0);
+
+        let reconciled: Vec<(Vec<String>, String)> = cards
+            .iter()
+            .map(|id| {
+                let obj = &state.objects[id];
+                (
+                    keyword_companion_entries(obj),
+                    format!("{:?}", obj.trigger_occurrence_state),
+                )
+            })
+            .collect();
+        assert_eq!(reconciled, expected);
     }
 
     #[test]
