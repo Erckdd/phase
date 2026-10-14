@@ -7056,23 +7056,30 @@ fn dispatch_collected_triggers(state: &mut GameState, pending: Vec<PendingTrigge
 /// that bounced) since their cast provenance is no longer meaningful, and is
 /// cleared on battlefield exit by `reset_for_battlefield_exit`.
 fn clear_post_collection_transients(state: &mut GameState) {
-    for obj in state.objects.iter_mut().map(|(_, v)| v) {
-        if !matches!(obj.zone, Zone::Battlefield | Zone::Stack) {
-            obj.cast_from_zone = None;
-            // CR 601.2h + CR 603.4 + CR 107.4e (issue #5943): the payment
-            // stamps must stay readable on Battlefield/Stack objects for
-            // intervening-if re-checks at resolution ("if {W}{W} was spent to
-            // cast it"). Everywhere else the cast provenance is no longer
-            // meaningful — a countered/fizzled spell went Stack → Graveyard,
-            // so `reset_for_battlefield_exit` (the exit-clear authority for
-            // battlefield objects, CR 400.7) never ran on it. Clear all five
-            // payment stamps through the single authority, mirroring
-            // `cast_from_zone`, so none of them leak onto a later object
-            // identity via reanimation.
-            obj.clear_cast_payment_stamps();
-        }
-        obj.mana_spent_to_cast = false;
-    }
+    state.objects.update_where(
+        |_, obj| {
+            obj.mana_spent_to_cast
+                || (!matches!(obj.zone, Zone::Battlefield | Zone::Stack)
+                    && (obj.cast_from_zone.is_some() || obj.has_cast_payment_stamps()))
+        },
+        |_, obj| {
+            if !matches!(obj.zone, Zone::Battlefield | Zone::Stack) {
+                obj.cast_from_zone = None;
+                // CR 601.2h + CR 603.4 + CR 107.4e (issue #5943): the payment
+                // stamps must stay readable on Battlefield/Stack objects for
+                // intervening-if re-checks at resolution ("if {W}{W} was spent to
+                // cast it"). Everywhere else the cast provenance is no longer
+                // meaningful — a countered/fizzled spell went Stack → Graveyard,
+                // so `reset_for_battlefield_exit` (the exit-clear authority for
+                // battlefield objects, CR 400.7) never ran on it. Clear all five
+                // payment stamps through the single authority, mirroring
+                // `cast_from_zone`, so none of them leak onto a later object
+                // identity via reanimation.
+                obj.clear_cast_payment_stamps();
+            }
+            obj.mana_spent_to_cast = false;
+        },
+    );
 }
 
 /// CR 603.3b: Outcome of the per-controller ordering pass for a freshly
@@ -51040,6 +51047,84 @@ mod pending_trigger_pin_reassignment_tests {
             assigned_pin,
             Some(expected),
             "assigning an unpinned ability must rebind the pin from the entry's own trigger event"
+        );
+    }
+}
+
+/// Per-site tests for the guarded sweep in `clear_post_collection_transients`:
+/// a sharing witness, a targeted test and a reference-equality test against
+/// the BASE-shaped unguarded loop.
+#[cfg(test)]
+mod object_sweep_sharing_tests {
+    use super::*;
+    use crate::types::object_map::sweep_test_support::{
+        assert_sweep_keeps_store_shared, assert_sweep_matches_reference, object_mut,
+        run_sweep_targeting, state_with_objects,
+    };
+    use crate::types::player::PlayerId;
+
+    const P0: PlayerId = PlayerId(0);
+    const P1: PlayerId = PlayerId(1);
+
+    /// BASE-shaped unguarded sweep.
+    fn reference_clear_post_collection_transients(state: &mut GameState) {
+        for obj in state.objects.iter_mut().map(|(_, v)| v) {
+            if !matches!(obj.zone, Zone::Battlefield | Zone::Stack) {
+                obj.cast_from_zone = None;
+                obj.clear_cast_payment_stamps();
+            }
+            obj.mana_spent_to_cast = false;
+        }
+    }
+
+    /// Two battlefield permanents, a spell on the stack and two graveyard cards.
+    fn zone_fixture() -> (GameState, Vec<ObjectId>) {
+        state_with_objects(&[
+            (P0, Zone::Battlefield),
+            (P1, Zone::Battlefield),
+            (P0, Zone::Stack),
+            (P0, Zone::Graveyard),
+            (P1, Zone::Graveyard),
+        ])
+    }
+
+    /// Sharing witness: cast provenance is set only where it must stay
+    /// readable (battlefield and stack), and no `mana_spent_to_cast` is set.
+    #[test]
+    fn transient_clear_with_only_kept_provenance_keeps_store_shared() {
+        let (mut state, ids) = zone_fixture();
+        object_mut(&mut state, ids[0]).cast_from_zone = Some(Zone::Hand);
+        object_mut(&mut state, ids[2]).cast_from_zone = Some(Zone::Hand);
+        object_mut(&mut state, ids[2]).phyrexian_life_paid = 2;
+        assert_sweep_keeps_store_shared(state, clear_post_collection_transients);
+    }
+
+    /// Targeted test: only the graveyard card with stale provenance is copied.
+    #[test]
+    fn transient_clear_copies_only_the_stale_card() {
+        let (mut state, ids) = zone_fixture();
+        object_mut(&mut state, ids[3]).cast_from_zone = Some(Zone::Hand);
+        let (before, after) = run_sweep_targeting(state, ids[3], clear_post_collection_transients);
+        assert_eq!(before.objects[&ids[3]].cast_from_zone, Some(Zone::Hand));
+        assert_eq!(after.objects[&ids[3]].cast_from_zone, None);
+    }
+
+    /// Reference equality, with one object per disjunct of the guard
+    /// (battlefield `mana_spent_to_cast` only; off-zone `cast_from_zone`
+    /// only; off-zone payment stamp other than `mana_spent_to_cast` only) and
+    /// a battlefield permanent whose kept provenance makes the guard false.
+    #[test]
+    fn transient_clear_matches_unguarded_sweep() {
+        let (mut state, ids) = zone_fixture();
+        object_mut(&mut state, ids[0]).mana_spent_to_cast = true;
+        object_mut(&mut state, ids[1]).cast_from_zone = Some(Zone::Hand);
+        object_mut(&mut state, ids[3]).cast_from_zone = Some(Zone::Hand);
+        object_mut(&mut state, ids[4]).phyrexian_life_paid = 2;
+        assert_sweep_matches_reference(
+            &state,
+            &[ids[0], ids[3], ids[4]],
+            clear_post_collection_transients,
+            reference_clear_post_collection_transients,
         );
     }
 }
