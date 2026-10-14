@@ -350,6 +350,7 @@ mod doomsday;
 mod doomsday_excruciator_copy;
 mod doran_attack_block_pump;
 mod double_strike_first_strike_trigger_removes_attacker;
+mod dragon_egg_token_granted_activated_pump;
 mod dragon_man_reformed_robot_graveyard_discard_cost;
 mod dragon_whelp_activation_threshold_8388;
 mod dragonstorm_forecaster_named_or_tutor;
