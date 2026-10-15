@@ -11231,6 +11231,111 @@ fn parses_activate_only_if_condition_and_only_once_each_turn() {
     );
 }
 
+/// CR 602.5: Grim Repriser's graveyard return — "Activate only if an opponent
+/// has been dealt noncombat damage this turn" must parse to a RequiresCondition
+/// gate over `DamageDealtThisTurn { NoncombatOnly } >= 1`, with no
+/// Unimplemented clause. The bare "was dealt damage" form (Skarrgan Pit-Skulk's
+/// Bloodthirst gate) is re-asserted as `Any` in the same test so the qualifier
+/// threading cannot collapse the unqualified cell.
+#[test]
+fn parses_grim_repriser_noncombat_damage_activation_gate() {
+    const GRIM_ACTIVATED: &str = "{B}{R}: Return this card from your graveyard to the battlefield with a finality counter on it. Activate only if an opponent has been dealt noncombat damage this turn. (If a creature with a finality counter on it would die, exile it instead.)";
+    const BARE_ACTIVATED: &str = "{B}{R}: Return this card from your graveyard to the battlefield with a finality counter on it. Activate only if an opponent was dealt damage this turn. (If a creature with a finality counter on it would die, exile it instead.)";
+    let r = parse(
+        GRIM_ACTIVATED,
+        "Grim Repriser",
+        &[],
+        &["Creature"],
+        &["Zombie", "Bard"],
+    );
+    assert_eq!(r.abilities.len(), 1);
+    // CR 113.6m: the effect moves the source out of the graveyard, so the
+    // ability functions only from the graveyard.
+    assert_eq!(
+        r.abilities[0].activation_zone,
+        Some(Zone::Graveyard),
+        "CR 113.6m: a graveyard self-return functions only from the graveyard"
+    );
+    let restrictions = &r.abilities[0].activation_restrictions;
+    match restrictions.iter().find_map(|r| match r {
+        ActivationRestriction::RequiresCondition { condition } => condition.clone(),
+        _ => None,
+    }) {
+        Some(ParsedCondition::QuantityComparison {
+            lhs:
+                QuantityExpr::Ref {
+                    qty:
+                        QuantityRef::DamageDealtThisTurn {
+                            source,
+                            target,
+                            aggregate: AggregateFunction::Sum,
+                            group_by: None,
+                            damage_kind: DamageKindFilter::NoncombatOnly,
+                            ..
+                        },
+                },
+            comparator: Comparator::GE,
+            rhs: QuantityExpr::Fixed { value: 1 },
+        }) => {
+            assert_eq!(
+                *source,
+                TargetFilter::Any,
+                "the gate counts damage from any source"
+            );
+            match target.as_ref() {
+                TargetFilter::And { filters }
+                    if filters.len() == 2
+                        && filters[0] == TargetFilter::Player
+                        && matches!(
+                            &filters[1],
+                            TargetFilter::Typed(tf)
+                                if tf.controller == Some(ControllerRef::Opponent)
+                        ) => {}
+                other => panic!("expected the opponent player-only recipient, got {other:?}"),
+            }
+        }
+        other => panic!(
+            "expected RequiresCondition with NoncombatOnly DamageDealtThisTurn, got {other:?}"
+        ),
+    }
+    assert!(r.parse_warnings.is_empty());
+    assert!(
+        !parsed_has_unimplemented(&r),
+        "no clause of Grim Repriser may fall through to Unimplemented"
+    );
+
+    // Regression tripwire: the bare Skarrgan form keeps the `Any` damage class.
+    let bare = parse(
+        BARE_ACTIVATED,
+        "Grim Repriser",
+        &[],
+        &["Creature"],
+        &["Zombie", "Bard"],
+    );
+    assert!(bare.parse_warnings.is_empty());
+    assert!(
+        bare.abilities[0]
+            .activation_restrictions
+            .iter()
+            .any(|r| matches!(
+                r,
+                ActivationRestriction::RequiresCondition {
+                    condition: Some(ParsedCondition::QuantityComparison {
+                        lhs: QuantityExpr::Ref {
+                            qty: QuantityRef::DamageDealtThisTurn {
+                                damage_kind: DamageKindFilter::Any,
+                                ..
+                            }
+                        },
+                        comparator: Comparator::GE,
+                        rhs: QuantityExpr::Fixed { value: 1 },
+                    })
+                }
+            )),
+        "the bare 'was dealt damage' gate must stay DamageKindFilter::Any"
+    );
+}
+
 #[test]
 fn parses_activate_only_if_condition_and_only_as_sorcery() {
     let r = parse(

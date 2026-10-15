@@ -1092,11 +1092,12 @@ fn parse_source_was_dealt_damage_this_turn(input: &str) -> OracleResult<'_, Stat
     ))
     .parse(input)?;
     // Accept both passive-voice tense forms: "was dealt" and "has been dealt".
-    let (rest, _) = alt((
-        tag(" was dealt damage this turn"),
-        tag(" has been dealt damage this turn"),
-    ))
-    .parse(rest)?;
+    let (rest, _) = alt((tag(" was dealt "), tag(" has been dealt "))).parse(rest)?;
+    // CR 120.2a / CR 120.2b: the shared damage-class axis — delegated to
+    // `parse_damage_kind_qualifier`, the authority this module's
+    // qualifier-bearing damage-history surfaces use to name their damage class.
+    let (rest, damage_kind) = parse_damage_kind_qualifier(rest)?;
+    let (rest, _) = tag("damage this turn").parse(rest)?;
     Ok((
         rest,
         make_quantity_ge(
@@ -1105,7 +1106,7 @@ fn parse_source_was_dealt_damage_this_turn(input: &str) -> OracleResult<'_, Stat
                 target: Box::new(target),
                 aggregate: AggregateFunction::Sum,
                 group_by: None,
-                damage_kind: DamageKindFilter::Any,
+                damage_kind,
 
                 channel: DamageChannel::Total,
             },
@@ -21425,6 +21426,180 @@ mod tests {
             }
             other => panic!("expected opponent noncombat-damage threshold quantity, got {other:?}"),
         }
+    }
+
+    /// CR 120.2b + CR 602.5: Grim Repriser's verbatim gate — "an opponent has
+    /// been dealt noncombat damage this turn". The "has been dealt" tense plus
+    /// the `noncombat` qualifier must compose to `NoncombatOnly` at threshold 1.
+    #[test]
+    fn test_opponent_has_been_dealt_noncombat_damage_this_turn() {
+        let (rest, c) =
+            parse_inner_condition("an opponent has been dealt noncombat damage this turn").unwrap();
+        assert_eq!(rest, "");
+        match c {
+            StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty:
+                            QuantityRef::DamageDealtThisTurn {
+                                source,
+                                target,
+                                aggregate: AggregateFunction::Sum,
+                                group_by: None,
+                                damage_kind: DamageKindFilter::NoncombatOnly,
+
+                                channel: DamageChannel::Total,
+                            },
+                    },
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 1 },
+            } => {
+                assert_eq!(*source, TargetFilter::Any);
+                assert_player_recipient(&target, ControllerRef::Opponent);
+            }
+            other => panic!("expected opponent noncombat-damage gate quantity, got {other:?}"),
+        }
+    }
+
+    /// The unqualified sibling stays `Any`: "an opponent was dealt damage this
+    /// turn" (Skarrgan Pit-Skulk's Bloodthirst gate) must not collapse to a
+    /// damage class now that the qualifier threads through this arm.
+    #[test]
+    fn test_opponent_was_dealt_damage_this_turn_stays_any() {
+        let (rest, c) = parse_inner_condition("an opponent was dealt damage this turn").unwrap();
+        assert_eq!(rest, "");
+        match c {
+            StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty:
+                            QuantityRef::DamageDealtThisTurn {
+                                source,
+                                target,
+                                aggregate: AggregateFunction::Sum,
+                                group_by: None,
+                                damage_kind: DamageKindFilter::Any,
+
+                                channel: DamageChannel::Total,
+                            },
+                    },
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 1 },
+            } => {
+                assert_eq!(*source, TargetFilter::Any);
+                assert_player_recipient(&target, ControllerRef::Opponent);
+            }
+            other => panic!("expected opponent any-damage gate quantity, got {other:?}"),
+        }
+    }
+
+    /// Hostile sibling for the axis: "combat" names `CombatOnly`, never
+    /// `NoncombatOnly` or the empty-tag `Any`.
+    #[test]
+    fn test_opponent_was_dealt_combat_damage_this_turn() {
+        let (rest, c) =
+            parse_inner_condition("an opponent was dealt combat damage this turn").unwrap();
+        assert_eq!(rest, "");
+        match c {
+            StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty:
+                            QuantityRef::DamageDealtThisTurn {
+                                source,
+                                target,
+                                aggregate: AggregateFunction::Sum,
+                                group_by: None,
+                                damage_kind: DamageKindFilter::CombatOnly,
+
+                                channel: DamageChannel::Total,
+                            },
+                    },
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 1 },
+            } => {
+                assert_eq!(*source, TargetFilter::Any);
+                assert_player_recipient(&target, ControllerRef::Opponent);
+            }
+            other => panic!("expected opponent combat-damage gate quantity, got {other:?}"),
+        }
+    }
+
+    /// CR 120.2b: the self subject composes with the qualifier too — "~ has
+    /// been dealt noncombat damage this turn" is `SelfRef` + `NoncombatOnly`.
+    #[test]
+    fn test_self_has_been_dealt_noncombat_damage_this_turn() {
+        let (rest, c) =
+            parse_inner_condition("~ has been dealt noncombat damage this turn").unwrap();
+        assert_eq!(rest, "");
+        match c {
+            StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty:
+                            QuantityRef::DamageDealtThisTurn {
+                                source,
+                                target,
+                                aggregate: AggregateFunction::Sum,
+                                group_by: None,
+                                damage_kind: DamageKindFilter::NoncombatOnly,
+
+                                channel: DamageChannel::Total,
+                            },
+                    },
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 1 },
+            } => {
+                assert_eq!(*source, TargetFilter::Any);
+                assert_eq!(*target, TargetFilter::SelfRef);
+            }
+            other => panic!("expected self noncombat-damage gate quantity, got {other:?}"),
+        }
+    }
+
+    /// Ordering tripwire: the quantified form still takes the threshold arm
+    /// (`Max` over `Some(DamageGroupKey::Target)`, GE 4), never this arm's
+    /// `Sum`/`None` threshold-1 shape.
+    #[test]
+    fn test_opponent_damage_threshold_orders_before_bare_arm() {
+        let (rest, c) =
+            parse_inner_condition("an opponent was dealt 4 or more noncombat damage this turn")
+                .unwrap();
+        assert_eq!(rest, "");
+        match c {
+            StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty:
+                            QuantityRef::DamageDealtThisTurn {
+                                source,
+                                target,
+                                aggregate: AggregateFunction::Max,
+                                group_by: Some(DamageGroupKey::Target),
+                                damage_kind: DamageKindFilter::NoncombatOnly,
+
+                                channel: DamageChannel::Total,
+                            },
+                    },
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 4 },
+            } => {
+                assert_eq!(*source, TargetFilter::Any);
+                assert_player_recipient(&target, ControllerRef::Opponent);
+            }
+            other => panic!("expected opponent noncombat-damage threshold quantity, got {other:?}"),
+        }
+    }
+
+    /// The arm stops exactly at the condition end: trailing text is left
+    /// unconsumed rather than swallowed.
+    #[test]
+    fn test_opponent_noncombat_damage_gate_rejects_trailing_junk() {
+        let (rest, _) = parse_inner_condition(
+            "an opponent has been dealt noncombat damage this turn, draw a card",
+        )
+        .unwrap();
+        assert_eq!(rest, ", draw a card");
     }
 
     /// CR 120.1 + CR 603.4: "~ dealt damage to another creature this turn" — the
