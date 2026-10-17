@@ -1508,6 +1508,7 @@ mod throne_of_eldraine_mana_riders;
 mod throw_instead_tail_class;
 mod tibalt_fiend_blooded_6856;
 mod timely_ward_regression;
+mod timesifter_extra_turn_contest;
 mod tinybones_joins_up_multi_target;
 mod tinybones_pocket_nuisance;
 mod tobita_master_of_winds_flying_grant;
