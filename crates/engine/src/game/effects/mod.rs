@@ -5262,6 +5262,7 @@ fn instruction_outlives_declined_gate(
         target_incarnations: _,
         target_pins: _,
         legacy_selected_target_incarnations: _,
+        chosen_target_slots: _,
         illegal_target_slots: _,
         unjudged_target_slots: _,
         illegal_local_target_slots: _,
@@ -21683,6 +21684,27 @@ mod tests {
                     TargetFilter::SpecificObject { id: ObjectId(8) },
                 ]
             }
+        );
+    }
+
+    /// CR 601.2c + CR 120.1: the prepended fight subject is the parent's
+    /// target, so the damage child still declares only its own recipient.
+    #[test]
+    fn a_prepended_fight_subject_is_not_a_target_of_the_damage_child() {
+        let subject = ObjectId(7);
+        let recipient = TargetRef::Object(ObjectId(8));
+        let mut child = ResolvedAbility::new(Effect::NoOp, Vec::new(), ObjectId(1), PlayerId(0));
+        child.push_chosen_target(recipient.clone());
+
+        bind_one_sided_fight_subject(&mut child, OneSidedFightSubject::Prepend(subject));
+
+        assert_eq!(
+            child.targets,
+            vec![TargetRef::Object(subject), recipient.clone()]
+        );
+        assert_eq!(
+            crate::game::ability_utils::declared_targets_in_chain(&child),
+            vec![recipient]
         );
     }
 
