@@ -2019,3 +2019,8 @@ mod tidebinder_source_type_gate;
 
 mod resolution_progress_contract;
 mod search_result_missing_referent;
+
+mod celes_kotis_graveyard_origin_batch;
+mod squall_attack_batch_chosen_number;
+mod strago_cast_this_way_rider;
+mod tifa_additional_combat;

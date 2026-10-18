@@ -1407,6 +1407,87 @@ fn matching_counter_added_events_by_recipient(
     groups.into_iter().map(|(_, events)| events).collect()
 }
 
+/// CR 508.3d + CR 508.5a + CR 603.2c: collect one firing per ATTACKED player
+/// from each admitted attack declaration. A batched attack trigger whose head
+/// names the attacked player ("Whenever one or more creatures attack one of
+/// your opponents, if any of those creatures … to defending player") takes its
+/// occurrence granularity from that player — the shared per-attacked-player
+/// expansion (`matching_attack_events_by_defending_player`) supplies each
+/// group's narrowed context, and the intervening-if is checked PER GROUP:
+/// "those creatures" quantifies over the creatures attacking that one player,
+/// never over the combined declaration set. Grouping runs before the
+/// aggregate batching arm, so one declaration against two opponents produces
+/// two firings, each carrying its own defending player ("that player",
+/// `TargetFilter::DefendingPlayer`) and its own event for the CR 603.4
+/// resolution recheck.
+#[allow(clippy::too_many_arguments)] // The shared per-candidate filter chain needs each input.
+fn matching_batched_attack_events_by_defending_player(
+    state: &GameState,
+    event_batch: &[GameEvent],
+    trig_def: &TriggerDefinition,
+    source_context: &TriggerSourceContext,
+    controller: PlayerId,
+    matcher: TriggerMatcher,
+    active_suppress_triggers: &[ActiveSuppressTriggerStatic],
+    conditions: FiringConditions<'_>,
+) -> Vec<Vec<(usize, GameEvent)>> {
+    let mut groups = Vec::new();
+    for (index, candidate) in event_batch.iter().enumerate() {
+        // The per-candidate prefix of the shared `candidate_passes_batched_filters`
+        // chain (suppression → matcher); the condition is deliberately deferred
+        // to the per-group context below instead of the raw declaration.
+        if event_is_suppressed_by_static_triggers_cached(
+            state,
+            candidate,
+            Some(source_context),
+            active_suppress_triggers,
+        ) {
+            continue;
+        }
+        if !matcher(candidate, trig_def, source_context, state) {
+            continue;
+        }
+        for group_event in super::trigger_matchers::matching_attack_events_by_defending_player(
+            candidate,
+            trig_def,
+            source_context,
+            state,
+        ) {
+            if !conditions.hold(state, controller, source_context, &group_event) {
+                continue;
+            }
+            groups.push(vec![(index, group_event)]);
+        }
+    }
+    groups
+}
+
+/// CR 508.3d + CR 508.5a + CR 603.2c: whether a batched attack trigger's
+/// occurrence grammar is the attacked player, taken from the ACTIVE
+/// "one or more creatures attack <player>" head — whose scope lowers to a
+/// player-scope `valid_target` (`Typed { controller: … }` for "one of your
+/// opponents", `Controller` for "you"). That grammar fires once per defended
+/// player with that player's own attacker set (see
+/// `matching_attack_events_by_defending_player`).
+///
+/// Two neighbouring shapes deliberately stay on the aggregate branch:
+/// the passive "one or more of your opponents are attacked" head lowers its
+/// scope to the bare `TargetFilter::Opponent`, which `is_player_scope()`
+/// rejects — that aggregate phrasing is a single CR 603.2c trigger event even
+/// when two opponents are attacked in one declaration (issue #6643), and its
+/// parse test pins the distinction. An `attack_target_filter` alone (Zurzoth's
+/// "attack one or more players", the Curse cycle's "enchanted player") is not
+/// this gate either: those scopes were never split and keep their existing
+/// firing shape.
+fn attack_fires_per_defending_player(trig_def: &TriggerDefinition) -> bool {
+    trig_def.batched
+        && matches!(trig_def.mode, TriggerMode::Attacks)
+        && trig_def
+            .valid_target
+            .as_ref()
+            .is_some_and(|filter| filter.is_player_scope())
+}
+
 /// CR 603.2c: Whether a `CounterAdded` trigger fires once PER RECIPIENT object
 /// rather than once for the whole simultaneous batch.
 ///
@@ -1660,8 +1741,9 @@ fn singleton_attack_events(
 /// CR 508.1a + CR 603.4: Preserve declaration-time LKI when an attack event is
 /// narrowed for a per-firing trigger context. Object IDs may recur across
 /// distinct declaration records, so filter the records themselves rather than
-/// rebuilding snapshots.
-fn declaration_records_for_attackers(
+/// rebuilding snapshots. Shared with the per-attacked-player expansion in
+/// `trigger_matchers`.
+pub(super) fn declaration_records_for_attackers(
     event: &GameEvent,
     attackers: &[ObjectId],
 ) -> Vec<crate::types::game_state::AttackDeclarationRecord> {
@@ -1812,15 +1894,18 @@ impl FiringGroup {
 /// number of times, with the same narrowed contexts, whichever way it exists.
 ///
 /// The shapes, in precedence order: per-recipient counters, the whole-event
-/// received-damage fold, per-player-recipient damage, batched ("one or more")
-/// subjects, the per-occurrence fan-out, the event-source force-block singleton
-/// fallback, and the single event. The first four read the whole batch, so a
-/// caller asks for them once per batch (`fires_once_per_batch`).
+/// received-damage fold, per-player-recipient damage, per-attacked-player
+/// attack batches ("one or more creatures attack <player>"), batched ("one or
+/// more") subjects, the per-occurrence fan-out, the event-source force-block
+/// singleton fallback, and the single event. The first five read the whole
+/// batch, so a caller asks for them once per batch (`fires_once_per_batch`).
 ///
 /// Conditions are checked where the printed path always checked them: on the
-/// raw event before expansion (except for `Attacks`, whose condition reads the
-/// defending player of each narrowed attack), per candidate inside the batch
-/// shapes, and on each narrowed firing for every non-batched shape.
+/// raw event before expansion (except for `Attacks`-mode triggers, whose
+/// condition reads the attacked-player context of each narrowed firing — for
+/// the per-attacked-player batch shape the check runs once per group against
+/// that group's narrowed event), per candidate inside the batch shapes, and on
+/// each narrowed firing for every non-batched shape.
 /// `admitted` is the raw index of `event` in `event_batch` when the caller
 /// knows it.
 #[allow(clippy::too_many_arguments)] // Each input is an independent collection fact.
@@ -1893,6 +1978,20 @@ fn trigger_firing_groups(
                 conditions,
             ),
         )
+    } else if attack_fires_per_defending_player(trig_def) {
+        // CR 508.3d + CR 508.5a: the "one or more creatures attack <player>"
+        // class fires once per attacked player, with that player's own
+        // attacker set as the firing context.
+        indexed_groups(matching_batched_attack_events_by_defending_player(
+            state,
+            event_batch,
+            trig_def,
+            source_context,
+            controller,
+            matcher,
+            active_suppress_triggers,
+            conditions,
+        ))
     } else if trig_def.batched {
         let members = matching_batched_trigger_events(
             state,
@@ -15950,9 +16049,10 @@ fn evaluate_trigger_condition_with_source(
             state.players_attacked_this_turn.contains(&controller)
         }
         // CR 500.8 + CR 506.1 + CR 603.4: Intervening-if for "if it's the
-        // first combat phase of the turn".
+        // first combat phase of the turn" — the phase must be the one in
+        // progress (shared predicate with the static/ability evaluators).
         TriggerCondition::FirstCombatPhaseOfTurn => {
-            state.steps_started_this_turn.count(Phase::BeginCombat) == 1
+            super::conditions::first_combat_phase_in_progress(state)
         }
         // CR 603.4: "if you cast a [type] spell this turn" — check per-player cast history.
         TriggerCondition::CastSpellThisTurn { filter } => match filter {
@@ -16658,11 +16758,60 @@ fn attackers_declared_count(
                         },
                         FilterContext::from_trigger_source,
                     );
-                    matches_target_filter(state, *attacker_id, f, &context)
+                    attack_declaration_attacker_matches_filter(state, *attacker_id, f, &context)
                 })
             })
             .count(),
     }
+}
+
+/// CR 603.4 + CR 608.2h + CR 400.7 + CR 508.1: evaluate the resolution
+/// recheck's filter against one creature from the triggering attack
+/// declaration, pinned to the incarnation that attacked.
+///
+/// The declaration ledger (`CombatState.attacking_incarnations_this_combat`,
+/// written by `combat::commit_attack_declaration`; at most one entry per
+/// storage id per combat, reset at BeginCombat) names that incarnation. While
+/// the live object still is it, its live characteristics answer ("the ability
+/// will check the power and toughness of those creatures as it tries to
+/// resolve"). Once the attacking incarnation has left, CR 400.7 makes a return
+/// a new object, so the recheck must not read the later incarnation's live
+/// values: CR 608.2h routes the question to the attacking incarnation's last
+/// known information — Squall's official ruling is explicit: "If any of those
+/// creatures have left the battlefield since the first time the ability
+/// checked their power and toughness, use their power and toughness as they
+/// last existed on the battlefield." `state.lki_by_incarnation` holds exactly
+/// that exit-time snapshot per incarnation (captured by
+/// `zones::apply_zone_exit_cleanup` before the zone-exit revert restores the
+/// printed base values, CR 400.7), so a departed attacker must NOT fall
+/// through to the live graveyard-card reading `filter_inner` would give it.
+/// Fail closed when the declaration pin cannot be resolved.
+fn attack_declaration_attacker_matches_filter(
+    state: &GameState,
+    attacker_id: ObjectId,
+    filter: &TargetFilter,
+    context: &FilterContext<'_>,
+) -> bool {
+    let Some(attacking) = state.combat.as_ref().and_then(|combat| {
+        combat
+            .attacking_incarnations_this_combat
+            .iter()
+            .find(|reference| reference.object_id == attacker_id)
+    }) else {
+        return false;
+    };
+    if state.objects.get(&attacker_id).is_some_and(|object| {
+        object.zone == Zone::Battlefield && object.incarnation == attacking.incarnation
+    }) {
+        return matches_target_filter(state, attacker_id, filter, context);
+    }
+    state
+        .lki_by_incarnation
+        .get(&attacker_id)
+        .and_then(|history| history.get(&attacking.incarnation))
+        .is_some_and(|lki| {
+            matches_target_filter_on_lki_snapshot(state, attacker_id, lki, filter, context)
+        })
 }
 
 fn controller_ref_matches_player(
@@ -16766,13 +16915,27 @@ fn condition_is_attack_event_only(
                 trigger_mode_uses_attack_declaration_count(&trigger.mode)
             }
             crate::types::ability::AttackersDeclaredCountSubject::AttackTarget {
-                attacked, ..
-            } => trigger
-                .attack_target_filter
-                .as_ref()
-                .is_some_and(|trigger_filter| {
-                    attack_target_filters_compatible(trigger_filter, attacked)
-                }),
+                attacked,
+                filter,
+                ..
+            } => {
+                // CR 603.4: an UNWRAPPED AttackTarget count is an intervening-if
+                // — the trigger-head producers wrap their event-time counts in
+                // `TriggerCondition::EventTime` (dropped by the caller before
+                // this arm). A condition carrying an object-level filter is a
+                // fact about the creatures as they are, not about the
+                // declaration alone — it must survive onto the stack entry and
+                // be rechecked at resolution (Squall's chosen-number P/T
+                // existential). The filter-less intervening-if family keeps the
+                // pre-existing event-fact contract.
+                filter.is_none()
+                    && trigger
+                        .attack_target_filter
+                        .as_ref()
+                        .is_some_and(|trigger_filter| {
+                            attack_target_filters_compatible(trigger_filter, attacked)
+                        })
+            }
         },
         _ => false,
     }
@@ -19919,6 +20082,21 @@ pub mod tests {
         }
     }
 
+    fn attack_target_count_condition_with_pt_filter(
+        attacked: AttackTargetFilter,
+        filter: TargetFilter,
+    ) -> TriggerCondition {
+        TriggerCondition::AttackersDeclaredCount {
+            subject: AttackersDeclaredCountSubject::AttackTarget {
+                controller: ControllerRef::You,
+                attacked,
+                filter: Some(filter),
+            },
+            comparator: Comparator::GE,
+            count: 1,
+        }
+    }
+
     #[test]
     fn stack_condition_strips_min_co_attackers_only_for_attacks() {
         let attacks = make_trigger(TriggerMode::Attacks);
@@ -19967,6 +20145,41 @@ pub mod tests {
                 "{mode:?}: the intervening-if beside it must stay on the stack"
             );
         }
+    }
+
+    /// Review control (CR 508.1a + CR 603.4): a FILTERED attack count from the
+    /// trigger HEAD is the trigger event's own qualifier — the producer wraps it
+    /// in `EventTime`, so it is stripped and a later attacker mutation cannot
+    /// block resolution. A genuinely filtered INTERVENING-IF (Squall's
+    /// chosen-number existential) keeps its resolution recheck.
+    #[test]
+    fn stack_condition_keeps_only_intervening_if_attack_filters() {
+        let mut attacks = make_trigger(TriggerMode::YouAttack);
+        attacks.attack_target_filter = Some(AttackTargetFilter::Player);
+
+        // Head form: the producer's `EventTime` wrapper is the provenance.
+        let head = TriggerCondition::EventTime {
+            condition: Box::new(attack_target_count_condition_with_pt_filter(
+                AttackTargetFilter::Player,
+                TargetFilter::Any,
+            )),
+        };
+        assert_eq!(
+            stack_condition_for_trigger(&attacks, &head),
+            None,
+            "a head-produced filtered count is an event-time fact"
+        );
+
+        // Intervening-if form: unwrapped and filtered → retained for the recheck.
+        let intervening = attack_target_count_condition_with_pt_filter(
+            AttackTargetFilter::Player,
+            TargetFilter::Any,
+        );
+        assert_eq!(
+            stack_condition_for_trigger(&attacks, &intervening),
+            Some(intervening.clone()),
+            "a filtered intervening-if keeps its resolution recheck"
+        );
     }
 
     /// CR 603.8 + CR 603.4: a parsed state trigger stacks exactly its intervening
@@ -20110,6 +20323,168 @@ pub mod tests {
         assert_eq!(
             stack_condition_for_trigger(&no_filter, &player_condition),
             Some(player_condition)
+        );
+    }
+
+    /// CR 603.4: a filter-carrying `AttackTarget` attack-count condition is an
+    /// intervening-if about the creatures themselves, so it must survive onto
+    /// the stack entry for the resolution recheck (Squall's chosen-number P/T
+    /// existential). The filter-less sibling keeps the event-time-only family
+    /// contract byte-identically.
+    #[test]
+    fn stack_condition_keeps_filter_carrying_attack_target_counts() {
+        let mut trigger = make_trigger(TriggerMode::Attacks);
+        trigger.attack_target_filter = Some(AttackTargetFilter::Player);
+        let pt_filter = TargetFilter::Typed(TypedFilter::creature().properties(vec![
+            FilterProp::PtComparison {
+                stat: PtStat::Power,
+                scope: PtValueScope::Current,
+                comparator: Comparator::EQ,
+                value: QuantityExpr::Fixed { value: 2 },
+            },
+        ]));
+        let filtered =
+            attack_target_count_condition_with_pt_filter(AttackTargetFilter::Player, pt_filter);
+        assert_eq!(
+            stack_condition_for_trigger(&trigger, &filtered),
+            Some(filtered.clone()),
+            "the filter-carrying condition must survive for the CR 603.4 recheck"
+        );
+
+        let filterless = attack_target_count_condition(AttackTargetFilter::Player);
+        assert_eq!(
+            stack_condition_for_trigger(&trigger, &filterless),
+            None,
+            "the filter-less AttackTarget family stays event-time-only"
+        );
+    }
+
+    /// CR 603.4 + CR 608.2h + CR 400.7 + CR 208.1: the attack-declaration
+    /// recheck's filter reads a live battlefield creature's characteristics,
+    /// and a departed attacker's LAST BATTLEFIELD characteristics from the
+    /// pinned incarnation's `lki_by_incarnation` snapshot — never the reverted
+    /// printed base.
+    #[test]
+    fn attack_declaration_filter_reads_last_battlefield_pt_after_exit() {
+        use crate::game::combat::CombatState;
+
+        let mut state = setup();
+        let attacker = make_creature(&mut state, PlayerId(0), "Departed Qualifier", 2, 2);
+        let pin = ObjectIncarnationRef::from_object(&state.objects[&attacker]);
+        state.combat = Some(CombatState {
+            attacking_incarnations_this_combat: [pin].into_iter().collect(),
+            ..CombatState::default()
+        });
+        let context = FilterContext::neutral();
+        let power_eq = |value: i32| {
+            TargetFilter::Typed(TypedFilter::creature().properties(vec![
+                FilterProp::PtComparison {
+                    stat: PtStat::Power,
+                    scope: PtValueScope::Current,
+                    comparator: Comparator::EQ,
+                    value: QuantityExpr::Fixed { value },
+                },
+            ]))
+        };
+
+        assert!(
+            attack_declaration_attacker_matches_filter(&state, attacker, &power_eq(2), &context),
+            "positive reach guard: the live battlefield read sees the 2/2"
+        );
+
+        // Direct pre-exit mutation: no layer pass runs between the write and
+        // the move, so the LKI snapshot captures 7/2 while the printed base
+        // stays 2/2.
+        state
+            .objects
+            .get_mut(&attacker)
+            .expect("attacker exists")
+            .power = Some(7);
+        move_to_zone(&mut state, attacker, Zone::Graveyard, &mut Vec::new());
+
+        assert!(
+            state.lki_cache.contains_key(&attacker),
+            "the zone exit must have captured a last-battlefield snapshot"
+        );
+        assert!(
+            state
+                .lki_by_incarnation
+                .get(&attacker)
+                .is_some_and(|history| history.contains_key(&pin.incarnation)),
+            "the zone exit must have captured the pinned incarnation's snapshot"
+        );
+        assert_eq!(
+            state.objects[&attacker].power,
+            Some(2),
+            "the live card is reverted to its printed base power"
+        );
+        assert!(
+            attack_declaration_attacker_matches_filter(&state, attacker, &power_eq(7), &context),
+            "the departed attacker is answered by its last-battlefield power"
+        );
+        assert!(
+            !attack_declaration_attacker_matches_filter(&state, attacker, &power_eq(2), &context),
+            "the reverted printed base must not be substituted for last-battlefield information"
+        );
+    }
+
+    /// CR 400.7 + CR 603.4 + CR 608.2h: the resolution recheck resolves the
+    /// attacker's attacking incarnation from the declaration ledger. With no
+    /// resolvable pin it fails closed — never the live object and never the newest
+    /// LKI. Every negative is paired with the same object resolving once its pin
+    /// exists.
+    #[test]
+    fn attack_declaration_recheck_fails_closed_without_the_declaration_pin() {
+        use crate::game::combat::CombatState;
+
+        let mut state = setup();
+        let attacker = make_creature(&mut state, PlayerId(0), "Unpinned Qualifier", 2, 2);
+        let context = FilterContext::neutral();
+        let power_eq = |value: i32| {
+            TargetFilter::Typed(TypedFilter::creature().properties(vec![
+                FilterProp::PtComparison {
+                    stat: PtStat::Power,
+                    scope: PtValueScope::Current,
+                    comparator: Comparator::EQ,
+                    value: QuantityExpr::Fixed { value },
+                },
+            ]))
+        };
+
+        // No combat at all: fail closed even though the live 2/2 matches.
+        assert!(
+            !attack_declaration_attacker_matches_filter(&state, attacker, &power_eq(2), &context),
+            "without a declaration pin the recheck must fail closed"
+        );
+
+        // Combat exists but carries no pin for this attacker.
+        state.combat = Some(CombatState::default());
+        assert!(
+            !attack_declaration_attacker_matches_filter(&state, attacker, &power_eq(2), &context),
+            "an empty declaration ledger must not answer from the live object"
+        );
+
+        // Paired positive reach guard: the same live object with its pin resolves.
+        let pin = ObjectIncarnationRef::from_object(&state.objects[&attacker]);
+        state.combat = Some(CombatState {
+            attacking_incarnations_this_combat: [pin].into_iter().collect(),
+            ..CombatState::default()
+        });
+        assert!(
+            attack_declaration_attacker_matches_filter(&state, attacker, &power_eq(2), &context),
+            "the pinned live incarnation resolves"
+        );
+
+        // A pin naming a different incarnation (with no LKI) must not fall back to
+        // the live object's matching values.
+        let stale = ObjectIncarnationRef::of(attacker, pin.incarnation + 1);
+        state.combat = Some(CombatState {
+            attacking_incarnations_this_combat: [stale].into_iter().collect(),
+            ..CombatState::default()
+        });
+        assert!(
+            !attack_declaration_attacker_matches_filter(&state, attacker, &power_eq(2), &context),
+            "a stale pin must fail closed rather than read the later live incarnation"
         );
     }
 
@@ -23497,11 +23872,13 @@ pub mod tests {
     }
 
     #[test]
-    fn first_combat_phase_condition_checks_turn_counter() {
+    fn first_combat_phase_condition_requires_the_phase_in_progress() {
         let mut state = setup();
         let condition = TriggerCondition::FirstCombatPhaseOfTurn;
 
+        // The counter is set but the phase has not started: false.
         state.steps_started_this_turn.clear();
+        state.phase = Phase::DeclareAttackers;
         assert!(!check_trigger_condition(
             &state,
             &condition,
@@ -23510,6 +23887,7 @@ pub mod tests {
             None,
         ));
 
+        // The turn's first combat phase is in progress: true.
         state.steps_started_this_turn.record(Phase::BeginCombat);
         assert!(check_trigger_condition(
             &state,
@@ -23519,7 +23897,22 @@ pub mod tests {
             None,
         ));
 
+        // An added combat phase is in progress: false.
         state.steps_started_this_turn.record(Phase::BeginCombat);
+        assert!(!check_trigger_condition(
+            &state,
+            &condition,
+            PlayerId(0),
+            None,
+            None,
+        ));
+
+        // Review control: the phase counter alone is not the answer — after the
+        // first combat phase ended, a phase that merely STARTED earlier this
+        // turn does not satisfy the condition.
+        state.steps_started_this_turn.clear();
+        state.steps_started_this_turn.record(Phase::BeginCombat);
+        state.phase = Phase::PostCombatMain;
         assert!(!check_trigger_condition(
             &state,
             &condition,
@@ -37553,6 +37946,8 @@ pub mod tests {
 
     #[test]
     fn attacks_you_typed_count_requires_matching_attackers_only() {
+        use crate::game::combat::CombatState;
+
         let mut state = setup();
         let trigger_controller = PlayerId(0);
         let dino1 = create_object(
@@ -37580,6 +37975,15 @@ pub mod tests {
             state.objects.get_mut(&id).unwrap().card_types.subtypes = vec!["Dinosaur".to_string()];
         }
         state.objects.get_mut(&goblin).unwrap().card_types.subtypes = vec!["Goblin".to_string()];
+
+        let ledger: HashSet<ObjectIncarnationRef> = [dino1, dino2, goblin]
+            .into_iter()
+            .map(|id| ObjectIncarnationRef::from_object(&state.objects[&id]))
+            .collect();
+        state.combat = Some(CombatState {
+            attacking_incarnations_this_combat: ledger,
+            ..CombatState::default()
+        });
 
         let dino_filter =
             TargetFilter::Typed(TypedFilter::default().subtype("Dinosaur".to_string()));
