@@ -17,7 +17,9 @@ use super::engine::EngineError;
 use super::priority;
 use super::stack;
 
-use crate::types::ability::ResolvedAbility;
+use crate::types::ability::{AbilityProvenance, ResolvedAbility};
+
+use super::game_object::GameObject;
 
 /// CR 306.5d + CR 606.3: Loyalty abilities may only be activated once per turn.
 /// CR 606.1: Loyalty abilities are activated abilities with a loyalty symbol in their cost.
@@ -72,6 +74,58 @@ pub(crate) fn can_activate_loyalty_ability_with_restriction_gates(
     )
 }
 
+/// CR 606.3 + CR 101.1: The cap on `obj`'s loyalty-ability activations this turn for
+/// the ability at `ability_index`: CR 606.3's "once per permanent per turn" limit,
+/// adjusted by every card that overrides it (CR 101.1). The single composition point
+/// for them: the base 1, which a `ModifyActivationLimit { keyword: "loyalty" }`
+/// static SETS (Oath of Teferi class, max semantics, read live per CR 611.3a), plus
+/// the player-wide grant (`Effect::GrantExtraLoyaltyActivations { target:
+/// Controller }`, The Chain Veil class), plus the permanent-scoped grant
+/// (`target: SelfRef`, Comet, Stellar Pup class).
+///
+/// The result is only meaningful against `obj.loyalty_activations_this_turn`: a
+/// static only RAISES the cap above the grant-only base `1 + grants` (max
+/// semantics, floor 1), so while that count is still below the base the static scan
+/// cannot change whether the cap is reached and is skipped, returning the base.
+/// Besides saving the walk, this keeps priority loyalty candidate production at a
+/// single exact static scan (the ActivateAsInstant permission consult): the
+/// pre-flush `all_present` presence default would otherwise fall through to a
+/// redundant exact scan here.
+fn loyalty_activation_cap(
+    state: &GameState,
+    obj: &GameObject,
+    player: PlayerId,
+    ability_index: usize,
+    restriction_gates: Option<&super::restrictions::ActivationRestrictionStaticGates>,
+) -> u32 {
+    let player_extra = state
+        .extra_loyalty_activations_this_turn
+        .get(&player)
+        .copied()
+        .unwrap_or(0);
+    // The permanent-scoped grant covers only the permanent's own ability: the
+    // card's ruling (not CR text) says it does not apply to a loyalty ability the
+    // permanent gained. CR 613.1f applies ability-adding effects in layer 6,
+    // after the characteristic abilities, which is the distinction
+    // `activated_ability_provenance` records.
+    let permanent_extra = match obj.activated_ability_provenance(ability_index) {
+        AbilityProvenance::Characteristic(_) => obj.extra_loyalty_activations_this_turn,
+        AbilityProvenance::Granted => 0,
+    };
+    let extra_grants = player_extra.saturating_add(permanent_extra);
+    let base_cap = 1u32.saturating_add(extra_grants);
+    if obj.loyalty_activations_this_turn < base_cap {
+        return base_cap;
+    }
+    super::restrictions::loyalty_activation_cap_from_statics(
+        state,
+        player,
+        obj.id,
+        restriction_gates,
+    )
+    .saturating_add(extra_grants)
+}
+
 fn can_activate_loyalty_ability_impl(
     state: &GameState,
     planeswalker_id: ObjectId,
@@ -99,34 +153,14 @@ fn can_activate_loyalty_ability_impl(
     // that permanent that turn. The per-permanent activation count is the
     // authoritative gate; `ModifyActivationLimit { keyword: "loyalty" }` statics
     // (Oath of Teferi class, read live per CR 611.3a) SET the base cap via max
-    // semantics, while effects like `Effect::GrantExtraLoyaltyActivations`
-    // (The Chain Veil class) ADD to it via
-    // `extra_loyalty_activations_this_turn[controller]`.
-    let extra_grants = state
-        .extra_loyalty_activations_this_turn
-        .get(&player)
-        .copied()
-        .unwrap_or(0);
-    // CR 606.3: static `ModifyActivationLimit` terms only RAISE the cap above
-    // the `1 + extra_grants` base (max semantics, floor 1), so when the count
-    // is already below the base cap the static scan cannot change the outcome
-    // and is skipped. Besides saving the walk, this keeps priority loyalty
-    // candidate production at a single exact static scan (the ActivateAsInstant
-    // permission consult): the pre-flush `all_present` presence default would
-    // otherwise fall through to a redundant exact scan here.
-    let base_cap = 1u32.saturating_add(extra_grants);
-    let cap = if obj.loyalty_activations_this_turn < base_cap {
-        base_cap
-    } else {
-        super::restrictions::loyalty_activation_cap_from_statics(
-            state,
-            player,
-            planeswalker_id,
-            restriction_gates,
-        )
-        .saturating_add(extra_grants)
-    };
-    if obj.loyalty_activations_this_turn >= cap {
+    // semantics, while effects like `Effect::GrantExtraLoyaltyActivations` ADD to
+    // it: for the controller's planeswalkers via
+    // `extra_loyalty_activations_this_turn[controller]` (The Chain Veil class),
+    // for one permanent via its own counter (Comet's source-scoped grant).
+    // `loyalty_activation_cap` composes them.
+    if obj.loyalty_activations_this_turn
+        >= loyalty_activation_cap(state, obj, player, ability_index, restriction_gates)
+    {
         return false;
     }
 
@@ -2052,6 +2086,298 @@ mod tests {
         assert!(
             !can_activate_ability_now(&state, PlayerId(0), pw2, 2),
             "CR 606.6: -8 still not payable at 2 loyalty (2 < 8)"
+        );
+    }
+
+    /// A Chain Veil-style loyalty ability: no `OnlyOnceEachTurn`, so the
+    /// per-ability-index restriction cannot mask the CR 606.3 per-permanent cap
+    /// these tests exercise.
+    fn make_uncapped_loyalty_ability(loyalty_amount: i32) -> AbilityDefinition {
+        AbilityDefinition::new(
+            AbilityKind::Activated,
+            Effect::Draw {
+                count: QuantityExpr::Fixed { value: 1 },
+                target: TargetFilter::Controller,
+            },
+        )
+        .cost(AbilityCost::Loyalty {
+            amount: loyalty_amount,
+        })
+        .sorcery_speed()
+    }
+
+    fn walker_with_grant(
+        state: &mut GameState,
+        owner: PlayerId,
+        abilities: Vec<AbilityDefinition>,
+        count: u32,
+        extra: u32,
+    ) -> ObjectId {
+        let pw = create_planeswalker(state, owner, "Probe Walker", 5, abilities);
+        let obj = state.objects.get_mut(&pw).unwrap();
+        obj.loyalty_activations_this_turn = count;
+        obj.extra_loyalty_activations_this_turn = extra;
+        pw
+    }
+
+    /// CR 606.3 + CR 101.1: a per-permanent grant of N raises the cap to N + 1.
+    /// The refusal at count 3 and the paired ungranted control (cap 1, count 1
+    /// refused) show the cap, not the activation count, decides.
+    #[test]
+    fn permanent_grant_raises_the_cap_by_its_amount() {
+        let mut state = setup();
+        let granted = walker_with_grant(
+            &mut state,
+            PlayerId(0),
+            vec![make_uncapped_loyalty_ability(1)],
+            0,
+            2,
+        );
+        for count in [0, 1, 2] {
+            state
+                .objects
+                .get_mut(&granted)
+                .unwrap()
+                .loyalty_activations_this_turn = count;
+            assert!(
+                can_activate_loyalty_ability(&state, granted, PlayerId(0), 0),
+                "count {count} is under a cap of 3"
+            );
+        }
+        state
+            .objects
+            .get_mut(&granted)
+            .unwrap()
+            .loyalty_activations_this_turn = 3;
+        assert!(
+            !can_activate_loyalty_ability(&state, granted, PlayerId(0), 0),
+            "count 3 reaches the cap of 3"
+        );
+
+        let ungranted = walker_with_grant(
+            &mut state,
+            PlayerId(0),
+            vec![make_uncapped_loyalty_ability(1)],
+            1,
+            0,
+        );
+        assert!(
+            !can_activate_loyalty_ability(&state, ungranted, PlayerId(0), 0),
+            "paired control: without a grant, count 1 reaches the base cap of 1"
+        );
+    }
+
+    /// CR 606.3: the permanent-scoped and player-wide grants compose additively
+    /// in the one gate: 1 base + 1 player-wide + 2 permanent-scoped.
+    #[test]
+    fn permanent_grant_is_additive_with_the_player_wide_grant() {
+        let mut state = setup();
+        let pw = walker_with_grant(
+            &mut state,
+            PlayerId(0),
+            vec![make_uncapped_loyalty_ability(1)],
+            0,
+            2,
+        );
+        let obj = &state.objects[&pw];
+        assert_eq!(
+            loyalty_activation_cap(&state, obj, PlayerId(0), 0, None),
+            3,
+            "reach-guard: the permanent grant alone gives 1 + 2"
+        );
+
+        state
+            .extra_loyalty_activations_this_turn
+            .insert(PlayerId(0), 1);
+        let obj = &state.objects[&pw];
+        assert_eq!(loyalty_activation_cap(&state, obj, PlayerId(0), 0, None), 4);
+    }
+
+    /// CR 606.3: neither grant reaches an opponent's planeswalker in the same
+    /// turn. No turn rollover is involved, so the sweep cannot make this pass
+    /// vacuously.
+    #[test]
+    fn grants_do_not_reach_an_opponents_planeswalker_in_the_same_turn() {
+        let mut state = setup();
+        let own = walker_with_grant(
+            &mut state,
+            PlayerId(0),
+            vec![make_uncapped_loyalty_ability(1)],
+            0,
+            2,
+        );
+        let opposing = walker_with_grant(
+            &mut state,
+            PlayerId(1),
+            vec![make_uncapped_loyalty_ability(1)],
+            0,
+            0,
+        );
+        state
+            .extra_loyalty_activations_this_turn
+            .insert(PlayerId(0), 1);
+
+        assert_eq!(
+            loyalty_activation_cap(&state, &state.objects[&own], PlayerId(0), 0, None),
+            4,
+            "reach-guard: P0's walker holds both grants"
+        );
+        assert_eq!(
+            loyalty_activation_cap(&state, &state.objects[&opposing], PlayerId(1), 0, None),
+            1,
+            "P1's walker gets only the base cap"
+        );
+    }
+
+    /// CR 613.1f + the card's ruling: the permanent-scoped grant covers the
+    /// permanent's own loyalty ability, not one gained in layer 6. The paired
+    /// control (`granted_abilities_from = None`) allows the same index, so
+    /// provenance, not the activation count, is what refuses it.
+    #[test]
+    fn permanent_grant_does_not_cover_a_gained_loyalty_ability() {
+        let mut state = setup();
+        let pw = walker_with_grant(
+            &mut state,
+            PlayerId(0),
+            vec![
+                make_uncapped_loyalty_ability(1),
+                make_uncapped_loyalty_ability(0),
+            ],
+            1,
+            2,
+        );
+        state.objects.get_mut(&pw).unwrap().granted_abilities_from = Some(1);
+
+        let obj = &state.objects[&pw];
+        assert_eq!(
+            obj.activated_ability_provenance(1),
+            AbilityProvenance::Granted
+        );
+        assert!(matches!(
+            obj.activated_ability_provenance(0),
+            AbilityProvenance::Characteristic(_)
+        ));
+        assert!(
+            can_activate_loyalty_ability(&state, pw, PlayerId(0), 0),
+            "the printed ability is covered (count 1 < cap 3)"
+        );
+        assert!(
+            !can_activate_loyalty_ability(&state, pw, PlayerId(0), 1),
+            "the gained ability is not covered (count 1 >= cap 1)"
+        );
+
+        state.objects.get_mut(&pw).unwrap().granted_abilities_from = None;
+        assert!(
+            can_activate_loyalty_ability(&state, pw, PlayerId(0), 1),
+            "paired control: the same index is covered when it is not gained"
+        );
+    }
+
+    /// CR 707.2 + CR 613.1a: a loyalty ability a copy effect supplied is still a
+    /// characteristic ability of the object, so a Clone or token copy of the
+    /// granting planeswalker keeps its own grant. Narrowing the gate to
+    /// `Characteristic(CharacteristicSetRef::Own)` would refuse it (cap 1).
+    #[test]
+    fn permanent_grant_covers_an_ability_supplied_by_a_copy_effect() {
+        use crate::types::ability::{CharacteristicSetRef, CopyEffectInstanceRef};
+
+        let mut state = setup();
+        let pw = walker_with_grant(
+            &mut state,
+            PlayerId(0),
+            vec![make_uncapped_loyalty_ability(1)],
+            1,
+            2,
+        );
+        assert!(
+            matches!(
+                state.objects[&pw].activated_ability_provenance(0),
+                AbilityProvenance::Characteristic(CharacteristicSetRef::Own)
+            ),
+            "paired control: an uncopied ability is Characteristic(Own)"
+        );
+        assert!(can_activate_loyalty_ability(&state, pw, PlayerId(0), 0));
+
+        state.objects.get_mut(&pw).unwrap().layer1_copy_effect = Some(CopyEffectInstanceRef {
+            continuous_effect_id: 1,
+            modification_index: 0,
+        });
+        assert!(
+            matches!(
+                state.objects[&pw].activated_ability_provenance(0),
+                AbilityProvenance::Characteristic(CharacteristicSetRef::Copied(_))
+            ),
+            "reach-guard: the ability now comes from a layer-1 copy effect"
+        );
+        assert!(
+            can_activate_loyalty_ability(&state, pw, PlayerId(0), 0),
+            "the copied characteristic ability keeps the grant (count 1 < cap 3)"
+        );
+    }
+
+    /// CR 606.3 + CR 611.3a: a `ModifyActivationLimit { keyword: "loyalty" }` static
+    /// (Oath of Teferi class) SETS the base cap and every grant ADDS to it: 2 from
+    /// the static + 1 player-wide + 2 permanent-scoped = 5. The static is consulted
+    /// only once the count reaches the grant-only base (1 + 1 + 2 = 4), so the probes
+    /// sit there. Dropping any one of the three terms refuses count 4, and the
+    /// control without the static refuses it too.
+    #[test]
+    fn grants_stack_on_a_loyalty_limit_static() {
+        use crate::types::ability::{ControllerRef, StaticDefinition, TypeFilter};
+        use crate::types::statics::StaticMode;
+
+        let mut state = setup();
+        let pw = walker_with_grant(
+            &mut state,
+            PlayerId(0),
+            vec![make_uncapped_loyalty_ability(1)],
+            4,
+            2,
+        );
+        state
+            .extra_loyalty_activations_this_turn
+            .insert(PlayerId(0), 1);
+        assert!(
+            !can_activate_loyalty_ability(&state, pw, PlayerId(0), 0),
+            "paired control: without the static the grants alone cap at 4"
+        );
+
+        let limit = create_object(
+            &mut state,
+            CardId(9_001),
+            PlayerId(0),
+            "Loyalty Limit".to_string(),
+            Zone::Battlefield,
+        );
+        let limit_obj = state.objects.get_mut(&limit).unwrap();
+        limit_obj.card_types.core_types.push(CoreType::Enchantment);
+        limit_obj.static_definitions.push(
+            StaticDefinition::new(StaticMode::ModifyActivationLimit {
+                keyword: "loyalty".to_string(),
+                new_limit: 2,
+            })
+            .affected(TargetFilter::Typed(
+                TypedFilter::new(TypeFilter::Planeswalker).controller(ControllerRef::You),
+            )),
+        );
+
+        assert_eq!(
+            loyalty_activation_cap(&state, &state.objects[&pw], PlayerId(0), 0, None),
+            5,
+            "reach-guard: the static's 2 plus both grants"
+        );
+        assert!(
+            can_activate_loyalty_ability(&state, pw, PlayerId(0), 0),
+            "count 4 is under a cap of 5"
+        );
+        state
+            .objects
+            .get_mut(&pw)
+            .unwrap()
+            .loyalty_activations_this_turn = 5;
+        assert!(
+            !can_activate_loyalty_ability(&state, pw, PlayerId(0), 0),
+            "count 5 reaches the cap of 5"
         );
     }
 }
