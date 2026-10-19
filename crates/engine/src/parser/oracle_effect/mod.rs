@@ -48309,7 +48309,9 @@ fn parse_unless_discard_hand_cost(after_unless: &str) -> Option<AbilityCost> {
     Some(AbilityCost::Discard {
         count: QuantityExpr::Ref {
             qty: QuantityRef::HandSize {
-                player: PlayerScope::ParentObjectTargetController,
+                player: PlayerScope::ParentObjectTarget {
+                    possession: crate::types::ability::PossessionAxis::Controller,
+                },
             },
         },
         filter: None,

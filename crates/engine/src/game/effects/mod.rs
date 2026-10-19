@@ -5336,6 +5336,26 @@ fn declined_search_parent_controller_available(
     }
 }
 
+// CR 108.3 + CR 608.2h: mirror `parent_target_owner` — the first object target
+// whose owner is known (live or LKI), else the propagated effect-context object.
+fn declined_search_parent_owner_available(state: &GameState, ability: &ResolvedAbility) -> bool {
+    ability
+        .target_occurrences()
+        .into_iter()
+        .enumerate()
+        .find_map(|(position, (target, _))| match target {
+            TargetRef::Object(id)
+                if state.objects.contains_key(&id) || state.lki_cache.contains_key(&id) =>
+            {
+                Some(declined_search_selected_object(
+                    state, ability, position, id,
+                ))
+            }
+            TargetRef::Object(_) | TargetRef::Player(_) => None,
+        })
+        .unwrap_or_else(|| ability.effect_context_object.is_some())
+}
+
 // CR 608.2c: each scope keeps the identity/fallback its ordinary reader consumes.
 fn declined_search_player_scope_dependency(
     state: &GameState,
@@ -5356,8 +5376,12 @@ fn declined_search_player_scope_dependency(
                 })
                 .unwrap_or(false)
         }),
-        PlayerScope::ParentObjectTargetController => !context
-            .is_some_and(|ability| declined_search_parent_controller_available(state, ability)),
+        PlayerScope::ParentObjectTarget { possession } => match possession {
+            PossessionAxis::Controller => !context
+                .is_some_and(|ability| declined_search_parent_controller_available(state, ability)),
+            PossessionAxis::Owner => !context
+                .is_some_and(|ability| declined_search_parent_owner_available(state, ability)),
+        },
         PlayerScope::RecipientController => context.is_some_and(|ability| {
             ability
                 .target_occurrences()
@@ -6648,7 +6672,7 @@ fn duration_outlives_declined_gate(duration: &Duration) -> bool {
             }
             | PlayerScope::RecipientController
             | PlayerScope::DefendingPlayer
-            | PlayerScope::ParentObjectTargetController
+            | PlayerScope::ParentObjectTarget { .. }
             | PlayerScope::SourceChosenPlayer
             | PlayerScope::AnyTurn
             | PlayerScope::SpecificPlayer { id: _ } => false,
@@ -23018,7 +23042,7 @@ fn resolve_grant_next_spell_ability(
     // ("the next spell you cast"). Exhaustive over PlayerScope (no `_`), so any
     // future variant forces a maintainer to re-confirm its next-spell semantics.
     let player = match player_scope {
-        PlayerScope::Target => ability.target_player(),
+        PlayerScope::Target => Some(ability.target_player()),
         // CR 513.1: `AnyTurn` is a duration-timing referent that never reaches a
         // next-spell player-selection position; default to the controller.
         PlayerScope::Controller
@@ -23031,17 +23055,27 @@ fn resolve_grant_next_spell_ability(
         // from a value/quantity/player-selection position.
         | PlayerScope::SpecificPlayer { .. }
         | PlayerScope::DefendingPlayer
-        | PlayerScope::ParentObjectTargetController
-        | PlayerScope::SourceChosenPlayer => ability.controller,
+        | PlayerScope::SourceChosenPlayer => Some(ability.controller),
+        // CR 109.4 + CR 108.3: the controller/owner of the parent object target.
+        PlayerScope::ParentObjectTarget { possession } => match possession {
+            PossessionAxis::Controller => {
+                crate::game::ability_utils::parent_target_controller(ability, state)
+            }
+            PossessionAxis::Owner => crate::game::ability_utils::parent_target_owner(ability, state),
+        },
     };
-    state
-        .pending_next_spell_modifiers
-        .push(crate::types::game_state::PendingNextSpellModifier {
-            player,
-            modifier,
-            spell_filter,
-            source_id: Some(ability.source_id),
-        });
+    // CR 609.3: with no resolvable parent referent there is no recipient, so
+    // the grant does nothing rather than defaulting to the controller.
+    if let Some(player) = player {
+        state.pending_next_spell_modifiers.push(
+            crate::types::game_state::PendingNextSpellModifier {
+                player,
+                modifier,
+                spell_filter,
+                source_id: Some(ability.source_id),
+            },
+        );
+    }
     events.push(GameEvent::EffectResolved {
         kind: crate::types::ability::EffectKind::GrantNextSpellAbility,
         source_id: ability.source_id,
@@ -24190,7 +24224,9 @@ mod tests {
                 player: PlayerScope::Target,
             },
             QuantityRef::HandSize {
-                player: PlayerScope::ParentObjectTargetController,
+                player: PlayerScope::ParentObjectTarget {
+                    possession: PossessionAxis::Controller,
+                },
             },
             QuantityRef::TargetControllerCounter {
                 kind: crate::types::player::PlayerCounterKind::Poison,
@@ -24478,7 +24514,9 @@ mod tests {
             },
         ]));
         let attr = QuantityRef::BattlefieldEntriesThisTurn {
-            player: PlayerScope::ParentObjectTargetController,
+            player: PlayerScope::ParentObjectTarget {
+                possession: PossessionAxis::Controller,
+            },
             filter,
         };
         assert_eq!(
@@ -24906,14 +24944,18 @@ mod tests {
                 exclude: Some(Box::new(PlayerScope::RecipientController)),
             },
             PlayerScope::Target,
-            PlayerScope::ParentObjectTargetController,
+            PlayerScope::ParentObjectTarget {
+                possession: PossessionAxis::Controller,
+            },
             PlayerScope::AllPlayers {
                 aggregate: crate::types::ability::AggregateFunction::Sum,
                 exclude: Some(Box::new(PlayerScope::Target)),
             },
             PlayerScope::AllPlayers {
                 aggregate: crate::types::ability::AggregateFunction::Sum,
-                exclude: Some(Box::new(PlayerScope::ParentObjectTargetController)),
+                exclude: Some(Box::new(PlayerScope::ParentObjectTarget {
+                    possession: PossessionAxis::Controller,
+                })),
             },
         ] {
             let needs_parent = match &scope {

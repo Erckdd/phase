@@ -8306,7 +8306,9 @@ fn whole_hand_discard_cost() -> AbilityCost {
     AbilityCost::Discard {
         count: QuantityExpr::Ref {
             qty: QuantityRef::HandSize {
-                player: PlayerScope::ParentObjectTargetController,
+                player: PlayerScope::ParentObjectTarget {
+                    possession: crate::types::ability::PossessionAxis::Controller,
+                },
             },
         },
         filter: None,
