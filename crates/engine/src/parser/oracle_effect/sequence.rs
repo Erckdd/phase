@@ -3070,6 +3070,12 @@ fn current_ends_with_bare_and(current: &str) -> bool {
 ///
 /// Subject-prefixed verb patterns ("you gain", "you lose", etc.) are safe because
 /// "you" + verb is never a noun phrase — it always starts an independent clause.
+///
+/// Targeted-player-subject patterns ("target opponent <player-action>",
+/// including the optional modal "target opponent may draw …") are likewise safe:
+/// a "target <player>" subject followed by a player-action predicate opens its
+/// own announced target (CR 601.2c) and is never a noun-phrase continuation — see
+/// `starts_targeted_opponent_predicate_clause_lower`.
 pub(crate) fn starts_bare_and_clause(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     starts_bare_and_clause_lower(&lower)
@@ -3200,6 +3206,18 @@ fn starts_each_player_predicate_clause_lower(s: &str) -> OracleResult<'_, ()> {
         tag("each other player "),
     ))
     .parse(s)?;
+    value((), parse_conjugated_player_action_verb).parse(rest)
+}
+
+/// CR 121.1 + CR 119.3 + CR 701.9a + CR 701.17a + CR 701.21a + CR 701.13a +
+/// CR 608.2c: the third-person-singular player-action verb axis shared by the
+/// player-subject clause splitters (`starts_each_player_predicate_clause_lower`
+/// and `starts_targeted_opponent_predicate_clause_lower`). Every verb is a
+/// player-only action — drawing (CR 121.1), gaining/losing life (CR 119.3),
+/// discarding (CR 701.9a), milling (CR 701.17a), sacrificing (CR 701.21a),
+/// exiling (CR 701.13a) — so ending a bare-`" and "` conjunct with one of them is
+/// unambiguous: a player-subject predicate, never a noun-phrase continuation.
+fn parse_conjugated_player_action_verb(input: &str) -> OracleResult<'_, ()> {
     value(
         (),
         alt((
@@ -3210,6 +3228,37 @@ fn starts_each_player_predicate_clause_lower(s: &str) -> OracleResult<'_, ()> {
             tag("mills "),
             tag("sacrifices "),
             tag("exiles "),
+        )),
+    )
+    .parse(input)
+}
+
+/// CR 601.2c + CR 115.1 + CR 608.2c: a fresh `"target opponent <player-action>"` conjunct joined
+/// by a bare `" and "` opens its OWN announced player target (each instance of
+/// the word "target" is a distinct target — CR 601.2c) and is a complete
+/// subject-predicate clause, never a noun-phrase continuation of the prior
+/// conjunct. Tataru Taru: "you draw a card and target opponent may draw a
+/// card."; Mindculling: "You draw two cards and target opponent discards two
+/// cards."; Brink of Madness: "… sacrifice ~ and target opponent discards their
+/// hand." Without this arm the conjunct is swallowed by the first effect and the
+/// player-scoped half is dropped (Tataru/Mindculling) or mis-bound as a
+/// controller-scoped sub-ability (Brink).
+///
+/// The predicate axis is the optional modal (`may draw`, pinned by
+/// `subject::parse_player_action_verb` to the corpus-proven may-axis verb) or a
+/// third-person player-action verb. A genuine noun-phrase continuation ("… and
+/// target opponent") has no such predicate and is left un-split. Player-scope
+/// sibling of `starts_target_continuous_clause_lower`.
+fn starts_targeted_opponent_predicate_clause_lower(s: &str) -> OracleResult<'_, ()> {
+    let (rest, _) = tag("target opponent ").parse(s)?;
+    value(
+        (),
+        alt((
+            value(
+                (),
+                preceded(tag("may "), super::subject::parse_player_action_verb),
+            ),
+            value((), parse_conjugated_player_action_verb),
         )),
     )
     .parse(rest)
@@ -3774,6 +3823,13 @@ fn starts_bare_and_clause_lower(s: &str) -> bool {
     // `starts_target_continuous_clause_lower`) so the `alt(...)` cluster stays
     // under nom's 21-arm limit.
     .or(value((), starts_each_player_predicate_clause_lower))
+    // CR 601.2c + CR 115.1 + CR 608.2c: a fresh "target opponent <player-action>"
+    // conjunct (optional "may draw …" or a conjugated player-action verb) opens
+    // its OWN announced player target (Tataru Taru, Mindculling, Brink of
+    // Madness). Trailing `.or()` arm (mirroring
+    // `starts_target_continuous_clause_lower`) so the `alt(...)` cluster stays
+    // under nom's 21-arm limit.
+    .or(value((), starts_targeted_opponent_predicate_clause_lower))
     // CR 608.2c + CR 122.1: a bare "remove <quantity> <type> counter[s] …"
     // conjunct is an independent counter-removal instruction (Amy Pond). Trailing
     // `.or()` arm (mirroring `starts_target_continuous_clause_lower`) so the

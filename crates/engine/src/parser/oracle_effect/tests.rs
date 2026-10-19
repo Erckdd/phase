@@ -89288,3 +89288,519 @@ fn cast_permission_rider_requires_the_lingering_shape() {
         );
     }
 }
+
+/// CR 601.2c + CR 115.1 + CR 608.2c + CR 608.2d: the "target opponent
+/// `<player-action>`" bare-`and` clause boundary (Unit 1) and the
+/// targeted-optional representation for "target opponent may draw …" (Unit 2).
+/// SHAPE tests: they assert the parsed clause structure that the runtime
+/// cast/activate discriminators (`tests/integration/tataru_taru.rs`) then drive
+/// through the real pipeline.
+mod targeted_opponent_optional_tests {
+    use super::*;
+    use crate::parser::oracle_effect::sequence::starts_bare_and_clause;
+
+    /// CR 115.1: `"target opponent"` lowers to a type-less `Typed` filter whose
+    /// only distinguishing property is `controller: Opponent` (one announced
+    /// player), matching the mandatory sibling's shape.
+    fn is_targeted_opponent(filter: &TargetFilter) -> bool {
+        matches!(
+            filter,
+            TargetFilter::Typed(tf)
+                if tf.type_filters.is_empty()
+                    && tf.properties.is_empty()
+                    && tf.controller == Some(ControllerRef::Opponent)
+        )
+    }
+
+    fn changes_zone_execute(parsed: &crate::parser::oracle::ParsedAbilities) -> &AbilityDefinition {
+        let trigger = parsed
+            .triggers
+            .iter()
+            .find(|t| t.mode == TriggerMode::ChangesZone)
+            .expect("a ChangesZone (enters) trigger");
+        trigger.execute.as_deref().expect("trigger execute")
+    }
+
+    /// V1 (SHAPE) — CR 601.2c + CR 115.1 + CR 608.2c: a bare-`" and "` conjunct
+    /// headed by `target opponent` + a player-action predicate (third-person verb
+    /// or the optional `may draw` modal) is a clause boundary.
+    ///
+    /// Discriminators: the new arm must return true for the third-person verb and
+    /// the may-modal, and must stay false for a target-opponent noun phrase with
+    /// no predicate (`"target opponent"`), a sibling subject (`"that opponent"`),
+    /// and a set-scoped noun phrase (`"all other creatures"`). The paired positive
+    /// is the pre-existing continuous arm (`"target opponent gains 3 life"`),
+    /// proving the fixture reaches the splitter rather than short-circuiting.
+    #[test]
+    fn targeted_opponent_player_action_conjunct_is_a_bare_and_clause_boundary() {
+        // Paired positive reach guard: the pre-existing continuous arm still fires.
+        assert!(
+            starts_bare_and_clause("target opponent gains 3 life"),
+            "reach-guard: the continuous sibling arm must still split"
+        );
+        // The new third-person player-action arm.
+        assert!(starts_bare_and_clause("target opponent discards two cards"));
+        assert!(starts_bare_and_clause(
+            "target opponent discards their hand"
+        ));
+        assert!(starts_bare_and_clause("target opponent draws a card"));
+        // The may-axis (optional modal) arm.
+        assert!(starts_bare_and_clause("target opponent may draw a card"));
+        // Hostile negatives: no predicate, a different subject, a set-scoped noun.
+        assert!(!starts_bare_and_clause("target opponent"));
+        assert!(!starts_bare_and_clause("that opponent discards a card"));
+        assert!(!starts_bare_and_clause("all other creatures"));
+    }
+
+    /// V2 (SHAPE) — CR 608.2c: the targeted-optional conjunct splits off as its
+    /// own clause, while a compound-subject-each body stays one clause.
+    #[test]
+    fn targeted_opponent_optional_conjunct_splits_the_sequence() {
+        let chunks = split_clause_sequence("you draw a card and target opponent may draw a card");
+        assert_eq!(
+            chunks.len(),
+            2,
+            "Tataru's clause must split into its two instructions: {chunks:?}"
+        );
+
+        // Hostile: the compound-subject-each body is ONE instruction.
+        let compound = split_clause_sequence("you and target opponent each draw a card");
+        assert_eq!(
+            compound.len(),
+            1,
+            "a compound-subject-each body must stay one clause: {compound:?}"
+        );
+    }
+
+    /// V3 (SHAPE) — CR 608.2d + CR 115.1: Tataru Taru's ETB lowers with no
+    /// `Unimplemented`; the controller draws, and the second clause is a TARGETED
+    /// optional (`Draw{Typed{Opponent}}`, `optional: true`) whose head declares the
+    /// announced player group and names it as the may's actor through
+    /// `optional_player` (the engine's actor authority), with NO `player_scope` —
+    /// the chain's controller must not be rebound to the opponent's seat.
+    #[test]
+    fn tataru_etb_lowers_to_a_targeted_optional_draw() {
+        const TATARU: &str =
+            "When Tataru Taru enters, you draw a card and target opponent may draw a card.";
+        let parsed = parse_named_face(TATARU, "Tataru Taru", &["Creature"]);
+        let execute = changes_zone_execute(&parsed);
+
+        // Reach guard: every clause lowered (no `Unimplemented`).
+        assert!(
+            chain_nodes(execute)
+                .iter()
+                .all(|node| unimplemented_name(node).is_none()),
+            "Tataru's ETB must lower every clause: {execute:#?}"
+        );
+
+        // The controller's own draw is the head, mandatory.
+        let Effect::Draw { count, target } = &*execute.effect else {
+            panic!(
+                "expected the controller Draw head, got {:?}",
+                execute.effect
+            );
+        };
+        assert_eq!(*count, QuantityExpr::Fixed { value: 1 });
+        assert_eq!(*target, TargetFilter::Controller);
+        assert!(!execute.optional, "the controller's draw is mandatory");
+
+        // The targeted optional half.
+        let sub = execute
+            .sub_ability
+            .as_deref()
+            .expect("the targeted optional half");
+        let Effect::Draw { count, target } = &*sub.effect else {
+            panic!("expected the targeted Draw, got {:?}", sub.effect);
+        };
+        assert_eq!(*count, QuantityExpr::Fixed { value: 1 });
+        assert!(
+            is_targeted_opponent(target),
+            "the optional half must target a single opponent, got {target:?}"
+        );
+        assert!(sub.optional, "CR 608.2d: the opponent's draw is optional");
+        assert!(
+            sub.declares_chosen_group.is_some(),
+            "the targeted-optional head must declare the announced player group"
+        );
+        assert_eq!(
+            sub.optional_player,
+            Some(TargetFilter::DeclaredPlayer {
+                group: sub.declares_chosen_group.expect("declared group"),
+            }),
+            "CR 608.2d: the declared target opponent announces the may"
+        );
+        assert_eq!(
+            sub.player_scope, None,
+            "the chain's controller must NOT be rebound to the opponent's seat"
+        );
+
+        // Sibling: Mindculling's mandatory pair lowers to TWO independent draws /
+        // discards (same targeted family, no optional).
+        let mindculling = parse_named_face(
+            "You draw two cards and target opponent discards two cards.",
+            "Mindculling",
+            &["Sorcery"],
+        );
+        let root = mindculling
+            .abilities
+            .first()
+            .expect("Mindculling's spell chain");
+        assert!(matches!(
+            &*root.effect,
+            Effect::Draw {
+                count: QuantityExpr::Fixed { value: 2 },
+                target: TargetFilter::Controller,
+            }
+        ));
+        let discard = root
+            .sub_ability
+            .as_deref()
+            .expect("Mindculling's targeted discard");
+        assert!(
+            matches!(
+                &*discard.effect,
+                Effect::Discard {
+                    count: QuantityExpr::Fixed { value: 2 },
+                    target,
+                    ..
+                } if is_targeted_opponent(target)
+            ),
+            "got {:?}",
+            discard.effect
+        );
+    }
+
+    /// V7 (SHAPE, preservation) — CR 115.1 + CR 121.1: the mandatory sibling
+    /// `"target opponent draws a card"` is byte-identical: one targeted Draw, not
+    /// optional, no announcer, no per-seat scope.
+    #[test]
+    fn mandatory_target_opponent_draw_shape_is_unchanged() {
+        let parsed = parse_named_face(
+            "When ~ enters, target opponent draws a card.",
+            "Mandatory Opponent Draw",
+            &["Creature"],
+        );
+        let trigger = parsed
+            .triggers
+            .iter()
+            .find(|t| t.mode == TriggerMode::ChangesZone)
+            .expect("ETB trigger");
+        assert_eq!(
+            trigger.valid_target,
+            Some(TargetFilter::Player),
+            "the trigger announces one player target (CR 603.3d)"
+        );
+        let execute = trigger.execute.as_deref().expect("execute");
+        let Effect::Draw { count, target } = &*execute.effect else {
+            panic!("expected the targeted Draw, got {:?}", execute.effect);
+        };
+        assert_eq!(*count, QuantityExpr::Fixed { value: 1 });
+        assert!(is_targeted_opponent(target), "got {target:?}");
+        assert!(!execute.optional);
+        assert_eq!(execute.optional_player, None);
+        assert_eq!(execute.player_scope, None);
+
+        // Sibling instant form: the spell's own targeted Draw, unchanged.
+        let instant = parse_named_face(
+            "Target opponent draws a card.",
+            "Mandatory Opponent Draw Instant",
+            &["Instant"],
+        );
+        let root = instant.abilities.first().expect("spell chain");
+        let Effect::Draw { target, .. } = &*root.effect else {
+            panic!("expected the targeted Draw, got {:?}", root.effect);
+        };
+        assert!(is_targeted_opponent(target), "got {target:?}");
+        assert!(!root.optional);
+        assert_eq!(root.optional_player, None);
+        assert_eq!(root.player_scope, None);
+    }
+
+    /// V8 (SHAPE, preservation) — CR 608.2d: the causative `"target opponent may
+    /// have you draw a card"` keeps the CONTROLLER as the DRAWER (`Draw` targets
+    /// `OriginalController`) and the TARGETED OPPONENT as the decider: the
+    /// opponent announces the may, and the controller draws only if they accept.
+    ///
+    /// `optional_player: None` here is a DEFERRED representation detail of this
+    /// untouched shape, not evidence that the controller decides. Under this
+    /// field's shipped meaning ("the announcer is this ability's controller"),
+    /// leaving it unset names the wrong actor for the causative, and its surviving
+    /// per-seat `player_scope` is the same not-yet-correct fan-out the class fix
+    /// corrects for the `may draw` shapes — which is why this row asserts neither
+    /// of those as correct behaviour.
+    ///
+    /// What the row DOES pin is that the whole-clause discriminator must not
+    /// reroute this shape: it stays optional, its draw targets
+    /// `OriginalController`, and its `optional_player` keeps the value the
+    /// targeted-optional shape does not have.
+    #[test]
+    fn causative_target_opponent_may_have_is_unchanged() {
+        let parsed = parse_named_face(
+            "When ~ enters, target opponent may have you draw a card.",
+            "Causative Opponent May",
+            &["Creature"],
+        );
+        let execute = changes_zone_execute(&parsed);
+        let Effect::Draw { count, target } = &*execute.effect else {
+            panic!("expected the causative Draw, got {:?}", execute.effect);
+        };
+        assert_eq!(*count, QuantityExpr::Fixed { value: 1 });
+        assert_eq!(
+            *target,
+            TargetFilter::OriginalController,
+            "CR 608.2d: the CONTROLLER draws (the causative names WHO acts on you)"
+        );
+        assert!(execute.optional);
+        assert_eq!(
+            execute.optional_player, None,
+            "no announcer is stamped for the causative"
+        );
+
+        // Hostile class sibling: "you may have target opponent draw a card" (the
+        // CONTROLLER decides) must also keep `optional_player: None`, so the
+        // whole-clause discriminator cannot mis-claim it.
+        let controller_decides = parse_named_face(
+            "When ~ enters, you may have target opponent draw a card.",
+            "Controller Decides",
+            &["Creature"],
+        );
+        let execute = changes_zone_execute(&controller_decides);
+        assert!(
+            execute.optional,
+            "reach guard: the controller-decides clause is an optional effect"
+        );
+        assert_eq!(
+            execute.optional_player, None,
+            "the controller-decides shape must not be stamped with an opponent announcer"
+        );
+    }
+
+    /// V10 (SHAPE) — CR 601.2c + CR 402.1 + CR 608.2c: Brink of Madness's
+    /// `"… sacrifice ~ and target opponent discards their hand."` newly splits at
+    /// the sequence layer; the tail is its own targeted clause whose whole-hand
+    /// count names the announced target (`PlayerScope::Target`), NOT a per-seat
+    /// `ScopedPlayer` and not the controller.
+    #[test]
+    fn brink_of_madness_tail_splits_to_a_targeted_whole_hand_discard() {
+        assert_eq!(
+            split_clause_sequence("sacrifice ~ and target opponent discards their hand").len(),
+            2,
+            "Brink's tail must split at the bare \" and \""
+        );
+
+        const BRINK: &str = "At the beginning of your upkeep, if you have no cards in hand, \
+             sacrifice this enchantment and target opponent discards their hand.";
+        let parsed = parse_named_face(BRINK, "Brink of Madness", &["Enchantment"]);
+        let trigger = parsed
+            .triggers
+            .iter()
+            .find(|t| t.mode == TriggerMode::Phase)
+            .expect("upkeep trigger");
+        let execute = trigger.execute.as_deref().expect("execute");
+
+        // First clause: sacrifice is unchanged (SelfRef) in both readings.
+        assert!(
+            matches!(
+                &*execute.effect,
+                Effect::Sacrifice {
+                    target: TargetFilter::SelfRef,
+                    ..
+                }
+            ),
+            "got {:?}",
+            execute.effect
+        );
+
+        let discard = execute
+            .sub_ability
+            .as_deref()
+            .expect("the targeted discard tail");
+        let Effect::Discard { count, target, .. } = &*discard.effect else {
+            panic!("expected the targeted Discard, got {:?}", discard.effect);
+        };
+        assert!(
+            is_targeted_opponent(target),
+            "CR 115.1: the discard targets the announced opponent, got {target:?}"
+        );
+        assert_eq!(
+            *count,
+            QuantityExpr::Ref {
+                qty: QuantityRef::HandSize {
+                    player: PlayerScope::Target,
+                },
+            },
+            "CR 402.1 + CR 608.2c: \"their hand\" is the announced target's hand"
+        );
+        assert_eq!(
+            discard.player_scope, None,
+            "the targeted tail must not carry a per-seat opponent scope"
+        );
+    }
+
+    /// V10b (SHAPE) — CR 601.2c + CR 115.1. Arm-level: the NEW bare-`and` arm
+    /// claims a `target opponent <conjugated player-action verb>` conjunct (its
+    /// predicate is `draws`, which the pre-existing continuous arm does not own);
+    /// this assertion fails on revert. Card-level is a REGRESSION guard: Lord of
+    /// Tresserhorn prints `"…, and target opponent draws two cards."` and its
+    /// comma path already split that conjunct, so the card's parse is
+    /// **byte-identical to base** (it is NOT in the changed-card set — measured —
+    /// and this row cannot detect a change to the card). Sibling control:
+    /// Armistice's `gains` conjunct is claimed by
+    /// `starts_target_continuous_clause_lower` (registered earlier) → unchanged.
+    #[test]
+    fn lord_of_tresserhorn_draw_conjunct_is_unchanged_regression_guard() {
+        assert!(
+            starts_bare_and_clause("target opponent draws two cards"),
+            "the new arm must claim the conjugated `draws` conjunct"
+        );
+        // Reach-guard positive: the pre-existing continuous arm still claims `gains`.
+        assert!(starts_bare_and_clause("target opponent gains 3 life"));
+
+        const LORD_OF_TRESSERHORN: &str = "When Lord of Tresserhorn enters, you lose 2 life, you \
+             sacrifice two creatures, and target opponent draws two cards.\n{B}: Regenerate Lord \
+             of Tresserhorn.";
+        let parsed = parse_named_face(LORD_OF_TRESSERHORN, "Lord of Tresserhorn", &["Creature"]);
+        let execute = changes_zone_execute(&parsed);
+        let nodes = chain_nodes(execute);
+        assert_eq!(
+            nodes.len(),
+            3,
+            "lose life, sacrifice, targeted draw: {execute:#?}"
+        );
+        assert!(matches!(
+            &*nodes[0].effect,
+            Effect::LoseLife {
+                amount: QuantityExpr::Fixed { value: 2 },
+                ..
+            }
+        ));
+        assert!(matches!(&*nodes[1].effect, Effect::Sacrifice { .. }));
+        let Effect::Draw { count, target } = &*nodes[2].effect else {
+            panic!("expected the targeted draw tail, got {:?}", nodes[2].effect);
+        };
+        assert_eq!(*count, QuantityExpr::Fixed { value: 2 });
+        assert!(is_targeted_opponent(target), "got {target:?}");
+        assert!(
+            nodes[2].declares_chosen_group.is_some(),
+            "the tail declares the announced player"
+        );
+
+        // Sibling control: Armistice is claimed by the earlier continuous arm.
+        let armistice = parse_named_face(
+            "{3}{W}{W}: You draw a card and target opponent gains 3 life.",
+            "Armistice",
+            &["Enchantment"],
+        );
+        let root = armistice
+            .abilities
+            .first()
+            .expect("Armistice's activated ability");
+        assert!(matches!(
+            &*root.effect,
+            Effect::Draw {
+                target: TargetFilter::Controller,
+                ..
+            }
+        ));
+        let gain = root.sub_ability.as_deref().expect("the gains conjunct");
+        assert!(
+            matches!(
+                &*gain.effect,
+                Effect::GainLife {
+                    amount: QuantityExpr::Fixed { value: 3 },
+                    player,
+                } if is_targeted_opponent(player)
+            ),
+            "got {:?}",
+            gain.effect
+        );
+    }
+
+    /// V14 (SHAPE) — CR 115.1 + CR 608.2d: the targeted-optional head routes the
+    /// may through the engine's optional-actor authority (`optional_player`) as the
+    /// clause's own DECLARED-player reference — never a `player_scope`, which would
+    /// rebind the whole chain's controller to the opponent's seat. The Draw keeps
+    /// its announced `Typed{controller: Opponent}` player target, so the seat that
+    /// announces the may and the seat that draws are the same announced opponent.
+    #[test]
+    fn targeted_optional_stamps_the_declared_player_actor() {
+        // Head contract on the ETB class member.
+        let tat = parse_named_face(
+            "When Tataru Taru enters, you draw a card and target opponent may draw a card.",
+            "Tataru Taru",
+            &["Creature"],
+        );
+        let execute = changes_zone_execute(&tat);
+        let sub = execute
+            .sub_ability
+            .as_deref()
+            .expect("the targeted optional half");
+        let group = sub
+            .declares_chosen_group
+            .expect("the targeted-optional head declares the announced player group");
+        assert_eq!(
+            sub.optional_player,
+            Some(TargetFilter::DeclaredPlayer { group }),
+            "CR 608.2d: the actor is the clause's declared target opponent"
+        );
+        assert_eq!(
+            sub.player_scope, None,
+            "the chain's controller must NOT be rebound to the opponent's seat"
+        );
+
+        // Class coverage: every single-sentence member stamps the declared-player
+        // actor on the head and carries no per-seat scope. VERBATIM Oracle text.
+        for (text, name, types) in [
+            (
+                "When Tataru Taru enters, you draw a card and target opponent may draw a card.",
+                "Tataru Taru",
+                &["Creature"][..],
+            ),
+            (
+                "{G}: This creature gets +1/+1 until end of turn. Target opponent creates a \
+                 1/1 green Hippo creature token.\n{W}: This creature gains protection from \
+                 black and from red until end of turn. Target opponent gains 2 life.\n{U}: This \
+                 creature gains flying until end of turn. Target opponent may draw a card.",
+                "Questing Phelddagrif",
+                &["Creature"][..],
+            ),
+            (
+                "{G}: Phelddagrif gains trample until end of turn. Target opponent creates a \
+                 1/1 green Hippo creature token.\n{W}: Phelddagrif gains flying until end of \
+                 turn. Target opponent gains 2 life.\n{U}: Return Phelddagrif to its owner's \
+                 hand. Target opponent may draw a card.",
+                "Phelddagrif",
+                &["Creature"][..],
+            ),
+            (
+                "{W}, {T}: Prevent the next 2 damage that would be dealt to target creature \
+                 this turn. Target opponent may draw a card.",
+                "Soldevi Heretic",
+                &["Creature"][..],
+            ),
+        ] {
+            let parsed = parse_named_face(text, name, types);
+            let mut stamped_head = false;
+            let roots = parsed
+                .abilities
+                .iter()
+                .chain(parsed.triggers.iter().filter_map(|t| t.execute.as_deref()));
+            for ability in roots {
+                for node in chain_nodes(ability) {
+                    let Some(group) = node.declares_chosen_group else {
+                        continue;
+                    };
+                    if node.optional_player == Some(TargetFilter::DeclaredPlayer { group })
+                        && node.player_scope.is_none()
+                    {
+                        stamped_head = true;
+                    }
+                }
+            }
+            assert!(
+                stamped_head,
+                "{name}: reach guard: the declared-player actor is stamped on the head"
+            );
+        }
+    }
+}
