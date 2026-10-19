@@ -34,7 +34,7 @@ use super::triggers::TriggerMode;
 use super::zones::{EtbTapState, Zone};
 use crate::game::filter::FilterContext;
 use crate::game::game_object::{BackFaceData, DisplaySource};
-use crate::types::events::{ClashResult, PlayerActionKind};
+use crate::types::events::{ActivatedAbilityKind, ClashResult, PlayerActionKind};
 
 // ---------------------------------------------------------------------------
 // Supporting types
@@ -35297,6 +35297,24 @@ pub enum ContinuousModification {
         /// rather than a bool so the cap axis can grow to other use-restrictions.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cap: Option<ActivationRestriction>,
+        /// CR 606.1 + CR 606.2: An optional kind selector narrowing which
+        /// activated abilities this grant donates. `None` (the default)
+        /// donates all activated abilities; `Some(Loyalty)` donates only the
+        /// loyalty subset (Nicol Bolas, Dragon-God "has all loyalty abilities
+        /// of all other planeswalkers on the battlefield"). The kind filter is
+        /// ability-level (CR 606.2: an activated ability with a loyalty symbol
+        /// in its cost is a loyalty ability) while `source` is object-level —
+        /// the selector lives on the modification because planeswalkers can
+        /// hold non-loyalty activated abilities, which the unqualified grant
+        /// would over-grant. A typed `Option<ActivatedAbilityKind>` rather
+        /// than a bool so the axis can grow to other kind subsets.
+        /// The parser never pairs `Some(Loyalty)` with `Some(cap)` — an
+        /// implementation limitation (the rider fold declines kind-selected
+        /// grants), not a rules exemption: a use-restriction acquired with an
+        /// ability still applies to it (CR 602.5c). Enforced at the rider fold
+        /// in `fold_grant_cap_rider`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<ActivatedAbilityKind>,
     },
     /// CR 613.1f + CR 603.1 + CR 603.2: Grant the affected object **all triggered
     /// abilities of** the objects matching `source` (Koh, the Face Stealer "Koh

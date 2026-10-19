@@ -36,6 +36,7 @@ use crate::types::ability::{
 use crate::types::card::CardFace;
 use crate::types::card_type::CoreType;
 use crate::types::counter::{CounterMatch, CounterType};
+use crate::types::events::ActivatedAbilityKind;
 use crate::types::keywords::{Keyword, ProtectionTarget};
 use crate::types::mana::{ManaColor, ManaCost, ManaCostShard, ManaSpellGrant};
 use crate::types::phase::Phase;
@@ -5208,15 +5209,28 @@ fn fmt_modification(m: &crate::types::ability::ContinuousModification) -> String
             format!("remove {}", keyword_label(keyword))
         }
         ContinuousModification::GrantAbility { .. } => "grant ability".into(),
-        ContinuousModification::GrantAllActivatedAbilitiesOf { source, cap } => {
+        ContinuousModification::GrantAllActivatedAbilitiesOf { source, cap, kind } => {
             // Blind spot (same class as #5492/#5495/#5501/#5507): this rendered
             // only the bare label, swallowing `source`/`cap` with `..`, so a parser
             // change to which permanents' abilities are granted showed as a removal
             // with no compensating addition in the sticky. Expose the source filter
             // (and cap only when set, so unqualified signatures stay byte-identical).
-            let mut s = format!("grant all activated abilities of {}", fmt_target(source));
+            // CR 606.2: the kind selector is part of the signature — the loyalty
+            // subset keeps its own label (byte-identical to the retired sibling's),
+            // and any other `Some` kind is exposed so no axis value is swallowed.
+            let mut s = if *kind == Some(ActivatedAbilityKind::Loyalty) {
+                format!("grant all loyalty abilities of {}", fmt_target(source))
+            } else {
+                format!("grant all activated abilities of {}", fmt_target(source))
+            };
             if let Some(cap) = cap {
                 s.push_str(&format!(" (cap {cap:?})"));
+            }
+            if matches!(
+                kind,
+                Some(ActivatedAbilityKind::Normal) | Some(ActivatedAbilityKind::Mana)
+            ) {
+                s.push_str(&format!(" (kind {kind:?})"));
             }
             s
         }
@@ -15616,21 +15630,42 @@ mod tests {
 
     #[test]
     fn grant_all_abilities_signature_exposes_source() {
-        // Same class as #5492/#5495/#5501/#5507: GrantAllActivatedAbilitiesOf /
-        // GrantAllTriggeredAbilitiesOf rendered only the bare label, swallowing their
-        // `source` filter with `..`, so a parser change to which permanents' abilities
-        // are granted showed as a removal with no compensating addition in the sticky.
-        use crate::types::ability::{ContinuousModification, TargetFilter};
+        // Same class as #5492/#5495/#5501/#5507: the reference grants rendered
+        // only the bare label, swallowing their `source` filter with `..`, so
+        // a parser change to which permanents' abilities are granted showed as
+        // a removal with no compensating addition in the sticky.
+        use crate::types::ability::{
+            ContinuousModification, FilterProp, TargetFilter, TypeFilter, TypedFilter,
+        };
+        use crate::types::zones::Zone;
 
         let act = |source: TargetFilter| {
             fmt_modification(&ContinuousModification::GrantAllActivatedAbilitiesOf {
                 source,
                 cap: None,
+                kind: None,
             })
         };
         let trg = |source: TargetFilter| {
             fmt_modification(&ContinuousModification::GrantAllTriggeredAbilitiesOf { source })
         };
+        let loy = |source: TargetFilter| {
+            fmt_modification(&ContinuousModification::GrantAllActivatedAbilitiesOf {
+                source,
+                cap: None,
+                kind: Some(ActivatedAbilityKind::Loyalty),
+            })
+        };
+
+        // The loyalty subset keeps the retired sibling's label byte-identical.
+        assert_eq!(
+            loy(TargetFilter::SelfRef),
+            format!(
+                "grant all loyalty abilities of {}",
+                fmt_target(&TargetFilter::SelfRef)
+            ),
+            "loyalty-grant signature must stay byte-identical to the retired sibling's",
+        );
 
         // The source filter must appear in each signature ...
         assert!(
@@ -15640,6 +15675,23 @@ mod tests {
         assert!(
             trg(TargetFilter::SelfRef).contains(&fmt_target(&TargetFilter::SelfRef)),
             "triggered-grant signature must expose its source filter",
+        );
+        assert!(
+            loy(TargetFilter::SelfRef).contains(&fmt_target(&TargetFilter::SelfRef)),
+            "loyalty-grant signature must expose its source filter",
+        );
+        // ... so a source-filter swap changes the loyalty signature (reaches
+        // the new fmt arm's `fmt_target(source)`).
+        let battlefield_walkers =
+            TargetFilter::Typed(TypedFilter::new(TypeFilter::Planeswalker).properties(vec![
+                FilterProp::InZone {
+                    zone: Zone::Battlefield,
+                },
+            ]));
+        assert_ne!(
+            loy(TargetFilter::SelfRef),
+            loy(battlefield_walkers),
+            "different source filters must produce different loyalty-grant signatures",
         );
         // ... so different source filters produce distinct signatures, not one bare label.
         assert_ne!(
