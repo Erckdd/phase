@@ -47,7 +47,7 @@ import type { WireFormat } from "../network/wireEnvelope";
 
 /** Deck data format matching server protocol. */
 export interface DeckData {
-  bracket_tier?: CommanderBracketTier;
+  bracket_tier?: CommanderBracketTier | null;
   main_deck: string[];
   sideboard: string[];
   commander?: string[];

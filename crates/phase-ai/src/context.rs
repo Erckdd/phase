@@ -156,7 +156,7 @@ mod tests {
             &weights,
             &multipliers,
             PlayerId(0),
-            effective_tier(CommanderBracketTier::Optimized, None),
+            effective_tier(Some(CommanderBracketTier::Optimized), None),
         );
         assert_eq!(
             optimized.session.features[&PlayerId(0)]

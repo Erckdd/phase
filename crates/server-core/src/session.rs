@@ -7564,11 +7564,11 @@ mod tests {
             // Both decks present but with non-cEDH bracket tier (Core is the default).
             decks: vec![
                 Some(PlayerDeckPayload {
-                    bracket_tier: CommanderBracketTier::Core,
+                    bracket_tier: Some(CommanderBracketTier::Core),
                     ..Default::default()
                 }),
                 Some(PlayerDeckPayload {
-                    bracket_tier: CommanderBracketTier::Core,
+                    bracket_tier: Some(CommanderBracketTier::Core),
                     ..Default::default()
                 }),
             ],
@@ -10130,7 +10130,7 @@ mod tests {
     fn a_restored_cedh_table_still_starts() {
         let db = lands_db();
         let mut data = name_deck("Forest", 40);
-        data.bracket_tier = CommanderBracketTier::Cedh;
+        data.bracket_tier = Some(CommanderBracketTier::Cedh);
         let (mut mgr, code) = hosted_room(&db, &data);
         install_ai_seat(
             &mut mgr,
@@ -10548,11 +10548,11 @@ mod tests {
     fn the_bracket_message_is_unchanged_and_is_not_reused() {
         let bracket = StartGameError::Bracket(CedhBracketError::DeckNotCedh {
             seat_index: 0,
-            actual_tier: CommanderBracketTier::Core,
+            actual_tier: Some(CommanderBracketTier::Core),
         });
         let inner = CedhBracketError::DeckNotCedh {
             seat_index: 0,
-            actual_tier: CommanderBracketTier::Core,
+            actual_tier: Some(CommanderBracketTier::Core),
         };
 
         let rendered = bracket.to_string();

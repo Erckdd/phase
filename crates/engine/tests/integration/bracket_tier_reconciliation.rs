@@ -15,7 +15,7 @@ fn shared_db() -> Option<&'static engine::database::CardDatabase> {
     Some(db)
 }
 
-fn list_with_declaration(declared: CommanderBracketTier) -> DeckList {
+fn list_with_declaration(declared: Option<CommanderBracketTier>) -> DeckList {
     DeckList {
         player: PlayerDeckList {
             commander: vec!["Braids, Cabal Minion".to_string()],
@@ -45,20 +45,34 @@ fn resolved_pool(list: &DeckList) -> Option<engine::types::game_state::PlayerDec
 
 #[test]
 fn bracket_estimate_is_carried_and_reconciled_through_deck_loading() {
-    let Some(optimized) = resolved_pool(&list_with_declaration(CommanderBracketTier::Exhibition))
-    else {
+    let Some(undeclared) = resolved_pool(&list_with_declaration(None)) else {
         return;
     };
     assert_eq!(
-        optimized.estimated_bracket_tier,
+        undeclared.estimated_bracket_tier,
         Some(CommanderBracketTier::Optimized)
     );
     assert_eq!(
-        optimized.effective_bracket_tier().tier(),
-        CommanderBracketTier::Optimized
+        undeclared.effective_bracket_tier().tier(),
+        CommanderBracketTier::Optimized,
+        "an undeclared deck plays at its estimate"
     );
 
-    let cedh = resolved_pool(&list_with_declaration(CommanderBracketTier::Cedh))
+    let under_declared = resolved_pool(&list_with_declaration(Some(
+        CommanderBracketTier::Exhibition,
+    )))
+    .expect("fixture was available for the first resolve");
+    assert_eq!(
+        under_declared.estimated_bracket_tier,
+        Some(CommanderBracketTier::Optimized)
+    );
+    assert_eq!(
+        under_declared.effective_bracket_tier().tier(),
+        CommanderBracketTier::Exhibition,
+        "the owner's declaration is final even below the estimate"
+    );
+
+    let cedh = resolved_pool(&list_with_declaration(Some(CommanderBracketTier::Cedh)))
         .expect("fixture was available for the first resolve");
     assert_eq!(
         cedh.estimated_bracket_tier,
@@ -72,7 +86,7 @@ fn bracket_estimate_is_carried_and_reconciled_through_deck_loading() {
     let no_commander = resolved_pool(&DeckList {
         player: PlayerDeckList {
             main_deck: vec!["Ancient Tomb".to_string()],
-            bracket_tier: CommanderBracketTier::Upgraded,
+            bracket_tier: Some(CommanderBracketTier::Upgraded),
             ..Default::default()
         },
         ..Default::default()

@@ -838,7 +838,10 @@ mod tests {
                 death_trigger_names: death_triggers,
                 ..Default::default()
             },
-            effective_bracket_tier: engine::game::bracket_estimate::effective_tier(bracket, None),
+            effective_bracket_tier: engine::game::bracket_estimate::effective_tier(
+                Some(bracket),
+                None,
+            ),
             ..DeckFeatures::default()
         }
     }

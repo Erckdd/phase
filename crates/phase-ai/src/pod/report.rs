@@ -31,7 +31,8 @@ const DECK_FIELDS: [&str; 4] = ["seat0_deck", "seat1_deck", "seat2_deck", "seat3
 pub struct PodSeatConfig {
     pub label: String,
     pub difficulty: AiDifficulty,
-    pub tier: CommanderBracketTier,
+    /// The seat deck's declared bracket; `None` when it declares none.
+    pub tier: Option<CommanderBracketTier>,
     #[serde(default)]
     pub effective_tier: Option<CommanderBracketTier>,
 }
@@ -179,8 +180,8 @@ pub fn compare(baseline: &PodReport, current: &PodReport) -> Result<PodCompariso
         )?;
         guard(
             TIER_FIELDS[index],
-            baseline_seat.tier.to_string(),
-            current_seat.tier.to_string(),
+            declared_label(baseline_seat.tier),
+            declared_label(current_seat.tier),
         )?;
         guard_optional_effective_tier(
             EFFECTIVE_TIER_FIELDS[index],
@@ -279,6 +280,10 @@ fn guard_combo_table(
     }
 }
 
+fn declared_label(tier: Option<CommanderBracketTier>) -> String {
+    tier.map_or_else(|| "undeclared".to_string(), |tier| tier.to_string())
+}
+
 fn guard_optional_effective_tier(
     field: &'static str,
     baseline: Option<CommanderBracketTier>,
@@ -354,7 +359,7 @@ mod tests {
         let seat = |label: &str, seat_tier| PodSeatConfig {
             label: label.to_string(),
             difficulty: AiDifficulty::Easy,
-            tier: seat_tier,
+            tier: Some(seat_tier),
             effective_tier: Some(seat_tier),
         };
         PodReport::new(

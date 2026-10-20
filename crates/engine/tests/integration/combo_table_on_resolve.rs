@@ -68,7 +68,8 @@ fn deck() -> DeckList {
         player: PlayerDeckList {
             commander: vec![COMMANDER.to_string()],
             main_deck: vec![FIRST.to_string(), SECOND.to_string()],
-            bracket_tier: CommanderBracketTier::Exhibition,
+            // Undeclared, so the AI's effective tier is the estimate the combo floor raises.
+            bracket_tier: None,
             ..Default::default()
         },
         ..Default::default()

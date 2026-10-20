@@ -111,7 +111,7 @@ fn to_deck_data_carries_declared_tier_and_defaults_the_rest() {
         .expect("unlabelled feed deck");
 
     let declared_data = declared.to_deck_data();
-    assert_eq!(declared_data.bracket_tier, CommanderBracketTier::Cedh);
+    assert_eq!(declared_data.bracket_tier, Some(CommanderBracketTier::Cedh));
     assert_eq!(
         declared_data.combo_declaration,
         ComboDeclaration::Undeclared
@@ -119,7 +119,7 @@ fn to_deck_data_carries_declared_tier_and_defaults_the_rest() {
     assert!(declared_data.sideboard.is_empty());
 
     let unlabelled_data = unlabelled.to_deck_data();
-    assert_eq!(unlabelled_data.bracket_tier, CommanderBracketTier::Core);
+    assert_eq!(unlabelled_data.bracket_tier, None);
     assert_eq!(
         unlabelled_data.combo_declaration,
         ComboDeclaration::Undeclared

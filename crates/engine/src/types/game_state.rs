@@ -10266,12 +10266,11 @@ pub struct PlayerDeckPool {
     pub registered_scheme_deck: std::sync::Arc<Vec<DeckEntry>>,
     #[serde(default)]
     pub current_scheme_deck: std::sync::Arc<Vec<DeckEntry>>,
-    /// The declared bracket tier for this player's deck. The AI reads
-    /// [`Self::effective_bracket_tier`] instead of this declaration directly.
-    /// Defaults to `Core` for backward compatibility with saved states and test
-    /// fixtures that omit the field.
+    /// The bracket this player's deck owner declared; `None` means undeclared.
+    /// The AI reads [`Self::effective_bracket_tier`] instead of this declaration
+    /// directly. Saved states and fixtures that omit the field deserialize to `None`.
     #[serde(default)]
-    pub bracket_tier: CommanderBracketTier,
+    pub bracket_tier: Option<CommanderBracketTier>,
     /// The estimator's bracket floor. `None` means no estimate was taken, such as
     /// for a deck without a commander, a pre-phase payload, or a test fixture.
     /// The AI must never read `bracket_tier` directly; it reads
@@ -46022,10 +46021,11 @@ mod tests {
 
         let pool: PlayerDeckPool = serde_json::from_value(json).unwrap();
         assert_eq!(pool.estimated_bracket_tier, None);
+        assert_eq!(pool.bracket_tier, None);
         assert_eq!(
             pool.effective_bracket_tier().tier(),
-            pool.bracket_tier,
-            "a legacy pool's declaration remains its effective tier"
+            crate::game::bracket_estimate::CommanderBracketTier::Core,
+            "a legacy pool with neither a declaration nor an estimate plays at Core"
         );
     }
 

@@ -35,14 +35,14 @@ fn session_reconciles_declared_and_estimated_bracket_tiers() {
     state.deck_pools = vec![
         PlayerDeckPool {
             player: PlayerId(0),
-            bracket_tier: CommanderBracketTier::Exhibition,
+            bracket_tier: None,
             estimated_bracket_tier: Some(CommanderBracketTier::Optimized),
             ..Default::default()
         },
         PlayerDeckPool {
             player: PlayerId(1),
-            bracket_tier: CommanderBracketTier::Cedh,
-            estimated_bracket_tier: Some(CommanderBracketTier::Core),
+            bracket_tier: Some(CommanderBracketTier::Exhibition),
+            estimated_bracket_tier: Some(CommanderBracketTier::Optimized),
             ..Default::default()
         },
     ];
@@ -50,11 +50,13 @@ fn session_reconciles_declared_and_estimated_bracket_tiers() {
     let session = AiSession::from_game(&state);
     assert_eq!(
         session.features[&PlayerId(0)].effective_bracket_tier.tier(),
-        CommanderBracketTier::Optimized
+        CommanderBracketTier::Optimized,
+        "an undeclared deck plays at its estimate"
     );
     assert_eq!(
         session.features[&PlayerId(1)].effective_bracket_tier.tier(),
-        CommanderBracketTier::Cedh
+        CommanderBracketTier::Exhibition,
+        "the owner's declaration is final even below the estimate"
     );
 }
 
@@ -181,13 +183,13 @@ fn cedh_combo_state_with_synthetic_abilities(
     state.deck_pools.push(PlayerDeckPool {
         player: PlayerId(0),
         current_main: Arc::new(vec![dummy_entry.clone()]),
-        bracket_tier: tier,
+        bracket_tier: Some(tier),
         ..PlayerDeckPool::default()
     });
     state.deck_pools.push(PlayerDeckPool {
         player: PlayerId(1),
         current_main: Arc::new(vec![dummy_entry]),
-        bracket_tier: CommanderBracketTier::Core,
+        bracket_tier: Some(CommanderBracketTier::Core),
         ..PlayerDeckPool::default()
     });
 
@@ -224,7 +226,7 @@ fn cedh_full_stack_smoke() {
     let cedh_features = DeckFeatures::analyze(
         &[],
         engine::game::bracket_estimate::effective_tier(
-            engine::game::bracket_estimate::CommanderBracketTier::Cedh,
+            Some(engine::game::bracket_estimate::CommanderBracketTier::Cedh),
             None,
         ),
     );

@@ -181,7 +181,7 @@ mod tests {
 
     fn make_features(tier: CommanderBracketTier) -> DeckFeatures {
         DeckFeatures {
-            effective_bracket_tier: effective_tier(tier, None),
+            effective_bracket_tier: effective_tier(Some(tier), None),
             ..DeckFeatures::default()
         }
     }

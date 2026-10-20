@@ -34,10 +34,11 @@ pub struct DeckData {
     /// Oathbreaker RC: the signature spell card name. Empty for all non-Oathbreaker formats.
     #[serde(default)]
     pub signature_spell: Vec<String>,
-    /// Declared bracket tier for this deck. Defaults to `Core` when omitted,
-    /// preserving backward compatibility with older wire payloads.
+    /// The bracket this deck's owner declared. `None` means undeclared — the
+    /// engine then plays the deck at its estimate — and is what older wire
+    /// payloads that omit the field deserialize to.
     #[serde(default)]
-    pub bracket_tier: CommanderBracketTier,
+    pub bracket_tier: Option<CommanderBracketTier>,
     /// The deck owner's answer to the two-card-infinite-combo barometer. Defaults to
     /// `Undeclared` when omitted — every payload that predates this field is unanswered,
     /// which is deliberately NOT the same as a declared absence.
@@ -199,7 +200,7 @@ mod tests {
             contraption_deck: vec!["Contraption".to_string()],
             sticker_sheets: vec!["Stickers".to_string()],
             signature_spell: vec!["Signature".to_string()],
-            bracket_tier: CommanderBracketTier::Optimized,
+            bracket_tier: Some(CommanderBracketTier::Optimized),
             combo_declaration: ComboDeclaration::Intended {
                 window: Some(crate::game::bracket_estimate::ComboWindow::EarlyGame),
             },

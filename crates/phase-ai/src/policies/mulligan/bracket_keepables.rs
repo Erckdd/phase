@@ -227,11 +227,11 @@ mod tests {
     fn features_cedh(is_cedh: bool) -> DeckFeatures {
         DeckFeatures {
             effective_bracket_tier: effective_tier(
-                if is_cedh {
+                Some(if is_cedh {
                     CommanderBracketTier::Cedh
                 } else {
                     CommanderBracketTier::Core
-                },
+                }),
                 None,
             ),
             ..DeckFeatures::default()

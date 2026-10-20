@@ -509,7 +509,7 @@ mod tests {
     ) -> engine::types::game_state::PlayerDeckPool {
         engine::types::game_state::PlayerDeckPool {
             player,
-            bracket_tier: tier,
+            bracket_tier: Some(tier),
             ..Default::default()
         }
     }
@@ -617,7 +617,7 @@ mod tests {
                 99,
             )]),
             current_commander: std::sync::Arc::new(vec![elf_lord_commander()]),
-            bracket_tier: CommanderBracketTier::Core,
+            bracket_tier: Some(CommanderBracketTier::Core),
             ..Default::default()
         });
 
@@ -870,11 +870,11 @@ mod tests {
         let mut state = GameState::new_two_player(42);
         let payload = DeckPayload {
             player: PlayerDeckPayload {
-                bracket_tier: CommanderBracketTier::Cedh,
+                bracket_tier: Some(CommanderBracketTier::Cedh),
                 ..Default::default()
             },
             opponent: PlayerDeckPayload {
-                bracket_tier: CommanderBracketTier::Optimized,
+                bracket_tier: Some(CommanderBracketTier::Optimized),
                 ..Default::default()
             },
             ..Default::default()
@@ -888,7 +888,7 @@ mod tests {
             .expect("player 0 pool must exist after load");
         assert_eq!(
             p0_pool.bracket_tier,
-            CommanderBracketTier::Cedh,
+            Some(CommanderBracketTier::Cedh),
             "bracket_tier must round-trip through load_deck_into_state for player 0"
         );
 
@@ -899,7 +899,7 @@ mod tests {
             .expect("player 1 pool must exist after load");
         assert_eq!(
             p1_pool.bracket_tier,
-            CommanderBracketTier::Optimized,
+            Some(CommanderBracketTier::Optimized),
             "bracket_tier must round-trip through load_deck_into_state for player 1"
         );
     }
@@ -976,7 +976,7 @@ mod tests {
                 2,
             )]),
             current_commander: Arc::new(vec![elf_lord_commander()]),
-            bracket_tier: CommanderBracketTier::Core,
+            bracket_tier: Some(CommanderBracketTier::Core),
             ..Default::default()
         });
 
@@ -1026,7 +1026,7 @@ mod tests {
         core.deck_pools.clear();
         core.deck_pools.push(PlayerDeckPool {
             player: PlayerId(0),
-            bracket_tier: CommanderBracketTier::Exhibition,
+            bracket_tier: Some(CommanderBracketTier::Exhibition),
             estimated_bracket_tier: Some(CommanderBracketTier::Core),
             ..Default::default()
         });

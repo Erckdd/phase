@@ -33,10 +33,8 @@ pub struct AiDeckManifestEntry {
     pub name: String,
     pub commander: Vec<String>,
     pub main_deck: Vec<String>,
-    /// `None` == genuinely unlabelled. Never defaulted to `Core`: `DeckData`'s
-    /// `bracket_tier` default (starter_decks.rs:36-38) is a wire-compat default,
-    /// not a claim, and treating it as one is how an untagged feed deck would
-    /// silently become a Bracket-2 declaration.
+    /// `None` == genuinely unlabelled. Never defaulted to `Core`: that is how an
+    /// untagged feed deck would silently become a Bracket-2 declaration.
     #[serde(default)]
     pub declared: Option<CommanderBracketTier>,
     pub source: String,
@@ -120,15 +118,12 @@ impl AiDeckManifest {
 }
 
 impl AiDeckManifestEntry {
-    /// `bracket_tier` falls back to `CommanderBracketTier::default()` (== `Core`,
-    /// bracket_estimate.rs:31-36) ONLY at this boundary, because `DeckData` has no
-    /// "unknown" representation. The manifest's own `declared: None` is what the
-    /// selector reads; this conversion happens after selection.
+    /// An unlabelled entry stays undeclared, so the engine plays it at its estimate.
     pub fn to_deck_data(&self) -> DeckData {
         DeckData {
             commander: self.commander.clone(),
             main_deck: self.main_deck.clone(),
-            bracket_tier: self.declared.unwrap_or_default(),
+            bracket_tier: self.declared,
             ..Default::default()
         }
     }

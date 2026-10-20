@@ -386,7 +386,7 @@ mod tests {
         let db = db_from(&["Forest"]);
         let mut source = deck(&["Forest"], &[], &[]);
         source.sticker_sheets = vec!["Vampire Champion Fury".to_string()];
-        source.bracket_tier = engine::game::bracket_estimate::CommanderBracketTier::Cedh;
+        source.bracket_tier = Some(engine::game::bracket_estimate::CommanderBracketTier::Cedh);
 
         let payload = resolve_deck(&db, &ComboTable::default(), &source).expect("source resolves");
         let recovered = deck_data_from_payload(&db, &payload);

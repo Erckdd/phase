@@ -95,11 +95,10 @@ pub struct PlayerDeckPayload {
     /// the Oathbreaker. Empty for all non-Oathbreaker formats.
     #[serde(default)]
     pub signature_spell: Vec<DeckEntry>,
-    /// The declared bracket tier for this player's deck. Defaults to `Core`
-    /// so that existing serialized payloads and test fixtures that omit the
-    /// field continue to deserialize correctly.
+    /// The bracket this player's deck owner declared. `None` means undeclared,
+    /// and is what payloads and fixtures that omit the field deserialize to.
     #[serde(default)]
-    pub bracket_tier: CommanderBracketTier,
+    pub bracket_tier: Option<CommanderBracketTier>,
     /// The estimator's bracket floor. `None` means no estimate was taken, such as
     /// for a deck without a commander, a pre-phase payload, or a test fixture.
     /// AI code must never read `bracket_tier` directly; it reads the reconciled
@@ -150,11 +149,10 @@ pub struct PlayerDeckList {
     /// Oathbreaker RC: the signature spell card name. Empty for all non-Oathbreaker formats.
     #[serde(default)]
     pub signature_spell: Vec<String>,
-    /// Declared bracket tier for this player's deck. Defaults to `Core` for
-    /// backward-compatible deserialization (payloads that predate this field
-    /// omit it, which `#[serde(default)]` handles transparently).
+    /// The bracket this player's deck owner declared. `None` means undeclared,
+    /// and is what payloads that predate this field deserialize to.
     #[serde(default)]
-    pub bracket_tier: CommanderBracketTier,
+    pub bracket_tier: Option<CommanderBracketTier>,
     /// The deck owner's answer to the two-card-infinite-combo barometer. Defaults to
     /// `Undeclared` when omitted — every payload that predates this field is unanswered,
     /// which is deliberately NOT the same as a declared absence.
@@ -305,7 +303,7 @@ fn estimate_tier_for_seat(
     let estimated = estimate_bracket(list, db, combos).map(|estimate| estimate.tier);
     tracing::debug!(
         seat,
-        declared_tier = %list.bracket_tier,
+        declared_tier = ?list.bracket_tier,
         estimated_tier = ?estimated,
         combo_coverage = ?combos.coverage(),
         "resolved Commander bracket estimate"
@@ -569,7 +567,7 @@ fn main_deck_only_payload(main_deck: Vec<DeckEntry>) -> PlayerDeckPayload {
         contraption_deck: Vec::new(),
         sticker_sheets: Vec::new(),
         signature_spell: Vec::new(),
-        bracket_tier: CommanderBracketTier::default(),
+        bracket_tier: None,
         estimated_bracket_tier: None,
     }
 }

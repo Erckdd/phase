@@ -560,7 +560,8 @@ export interface ReplayPlayerDeckList {
   contraption_deck: string[];
   sticker_sheets: string[];
   signature_spell: string[];
-  bracket_tier: string;
+  /** `null` when the deck declares no bracket. */
+  bracket_tier: string | null;
   combo_declaration?: import("../types/bracketEstimate").ComboDeclaration;
 }
 

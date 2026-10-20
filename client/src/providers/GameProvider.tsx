@@ -258,7 +258,8 @@ type ExpandedDeckWithTier = {
   signature_spell: string[];
   companion: string[];
   sticker_sheets: string[];
-  bracket_tier: CommanderBracketTier;
+  /** The owner's declared bracket; `null` is undeclared (the engine plays the estimate). */
+  bracket_tier: CommanderBracketTier | null;
   /** The deck owner's two-card-combo answer; omitted means unanswered (the engine's default). */
   combo_declaration?: ComboDeclaration;
 };
@@ -357,7 +358,7 @@ function nativeFallbackReason(error: unknown): string {
 const EMPTY_PARSED_DECK: ParsedDeck = { main: [], sideboard: [] };
 
 function emptySeat(): ExpandedDeckWithTier {
-  return { ...emptySeatDeck(), bracket_tier: "core" };
+  return { ...emptySeatDeck(), bracket_tier: null };
 }
 
 function buildPlayerOnlyDeckList(player: ExpandedDeckWithTier): DeckListPayload {
@@ -384,7 +385,7 @@ async function buildLocalAiDeckList(
     if (!pile) throw new Error(t("multiplayer:page.couldNotLoadDeck"));
     const aiDifficulties = seats.map((seat) => seat.difficulty);
     return {
-      player: { ...pile, bracket_tier: "core" },
+      player: { ...pile, bracket_tier: null },
       opponent: emptySeat(),
       ai_decks: Array.from({ length: opponentCount - 1 }, emptySeat),
       ai_difficulties: aiDifficulties,
@@ -882,7 +883,7 @@ export function GameProvider({
               if (!signal.aborted) onNoDeckRef.current?.(tRef.current("multiplayer:page.couldNotLoadDeck"));
               return;
             }
-            player = { ...pileDeck, bracket_tier: "core" };
+            player = { ...pileDeck, bracket_tier: null };
           } else {
             player = emptySeat();
           }

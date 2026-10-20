@@ -108,10 +108,10 @@ pub struct DeckFeatures {
     /// CR 702.122: crewed-Vehicle density paired with the creature bench needed
     /// to tap for it. Gives `CrewTimingPolicy` the deck signal it lacked.
     pub vehicles: VehiclesFeature,
-    /// The reconciled `max(declared, estimated)` bracket tier. Unlike the other
-    /// fields, this is deck metadata rather than a card-text feature. It can be
-    /// built only through `effective_tier` or `Default`, preventing a raw
-    /// declaration from bypassing estimator reconciliation.
+    /// The bracket tier the AI plays this deck at: the owner's declaration, else
+    /// the estimate, else `Core`. Unlike the other fields, this is deck metadata
+    /// rather than a card-text feature. It can be built only through
+    /// `effective_tier` or `Default`, so a raw tier cannot skip that resolution.
     pub effective_bracket_tier: EffectiveBracketTier,
 }
 
@@ -176,7 +176,7 @@ mod cedh_field_tests {
     fn analyze_records_cedh_tier() {
         // Use an empty deck — structural features default to zero; the tier
         // should follow only the tier argument.
-        let f = DeckFeatures::analyze(&[], effective_tier(CommanderBracketTier::Cedh, None));
+        let f = DeckFeatures::analyze(&[], effective_tier(Some(CommanderBracketTier::Cedh), None));
         assert_eq!(f.effective_bracket_tier.tier(), CommanderBracketTier::Cedh);
     }
 
@@ -188,7 +188,7 @@ mod cedh_field_tests {
             CommanderBracketTier::Upgraded,
             CommanderBracketTier::Optimized,
         ] {
-            let f = DeckFeatures::analyze(&[], effective_tier(tier, None));
+            let f = DeckFeatures::analyze(&[], effective_tier(Some(tier), None));
             assert_eq!(f.effective_bracket_tier.tier(), tier);
             assert_ne!(f.effective_bracket_tier.tier(), CommanderBracketTier::Cedh);
         }

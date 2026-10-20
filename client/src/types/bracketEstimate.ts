@@ -253,12 +253,11 @@ export const BRACKET_TIER_BY_NUMERIC: Record<1 | 2 | 3 | 4 | 5, CommanderBracket
  * Convert the numeric `CommanderBracket` (1–5) stored on deck metadata into the
  * lowercase string tier the Rust engine expects on `PlayerDeckList.bracket_tier`.
  *
- * Uses `BRACKET_TIER_BY_NUMERIC`.
- * Returns `"core"` (the engine's `Default`) for any unrecognised value so
- * that missing or invalid tags degrade safely.
+ * Uses `BRACKET_TIER_BY_NUMERIC`. A missing or unrecognised tag is `null`
+ * (undeclared): the engine then plays the deck at its own estimate.
  */
-export function bracketToEngineTier(bracket: CommanderBracket | null | undefined): CommanderBracketTier {
-  return (bracket == null ? undefined : BRACKET_TIER_BY_NUMERIC[bracket]) ?? "core";
+export function bracketToEngineTier(bracket: CommanderBracket | null | undefined): CommanderBracketTier | null {
+  return (bracket == null ? undefined : BRACKET_TIER_BY_NUMERIC[bracket]) ?? null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

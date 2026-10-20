@@ -99,23 +99,18 @@ impl CommanderBracketTier {
 /// Bracket policy is WotC Commander Format Panel guidance, **not** the Comprehensive
 /// Rules — no `// CR` annotation applies (see the module header).
 ///
-/// A declaration may raise this value and can never lower it below what the estimator
-/// can prove from the deck's own contents. `Cedh` is declaration-only in both
-/// directions: [`estimate_bracket`] never returns it, so a `Cedh` declaration always
-/// survives and no estimate can manufacture one.
-///
-/// [`CommanderBracketTier::as_u8`] is the ordering authority. The enum deliberately
-/// derives no `Ord`: the order is stated once rather than inherited from declaration
-/// order.
+/// Brackets are a self-declaration system — "a tool to guide pregame conversations"
+/// (Commander Brackets Beta Update, 2026-02-09) — so the deck owner's declaration is
+/// final in both directions: a deck declared below its estimate plays at the
+/// declaration, and [`reconcile`] is what reports the under-declaration. An undeclared
+/// deck plays at its estimate, and a deck with neither plays at `Core`, the
+/// [`CommanderBracketTier`] default. `Cedh` stays declaration-only: [`estimate_bracket`]
+/// never returns it, so no estimate can manufacture one.
 pub fn effective_tier(
-    declared: CommanderBracketTier,
+    declared: Option<CommanderBracketTier>,
     estimated: Option<CommanderBracketTier>,
 ) -> EffectiveBracketTier {
-    let tier = match estimated {
-        Some(floor) if floor.as_u8() > declared.as_u8() => floor,
-        Some(_) | None => declared,
-    };
-    EffectiveBracketTier(tier)
+    EffectiveBracketTier(declared.or(estimated).unwrap_or_default())
 }
 
 /// A tier that has been through [`effective_tier`]. The inner field is private to this
@@ -583,7 +578,10 @@ pub struct BracketEstimate {
 /// The engine therefore makes exactly one claim: whether a declaration sits
 /// strictly BELOW the floor the deck's contents establish. It never claims a
 /// declaration above the floor is wrong — `estimate_bracket` returns a floor,
-/// and everything above it is the player's to declare. In particular a `Cedh`
+/// and everything above it is the player's to declare. `BASE_FLOOR` is where
+/// the estimator starts, not something the contents establish: a card list
+/// cannot tell Exhibition from Core, so an `Exhibition` declaration over a Core
+/// tier that no checkpoint raised is `AtOrAboveFloor`. In particular a `Cedh`
 /// declaration over an `Optimized` floor is `AtOrAboveFloor`: `decide_tier`
 /// never returns `Cedh`, pinned by `estimator_never_returns_cedh`, so B5 is
 /// unreachable by design and comparing for equality warns every correctly
@@ -617,12 +615,9 @@ pub struct BracketEstimateRequest {
     pub deck: PlayerDeckList,
     /// `None` means UNDECLARED — not `Core`.
     ///
-    /// Deliberately NOT read from `PlayerDeckList::bracket_tier`
-    /// (`game/deck_loading.rs`): that field is `#[serde(default)]` over a
-    /// `CommanderBracketTier` whose `Default` is `Core`, so a request that
-    /// simply omits a declaration would arrive as an explicit `Core`
-    /// declaration and every undeclared deck with a floor above Core would
-    /// report `BelowFloor`.
+    /// The request names the declaration it wants reconciled rather than reading
+    /// `deck.bracket_tier`, so the deck builder can reconcile its picker's current
+    /// value against the list being edited.
     #[serde(default)]
     pub declared_tier: Option<CommanderBracketTier>,
 }
@@ -637,18 +632,25 @@ pub fn reconcile(declared: CommanderBracketTier, estimate: &BracketEstimate) -> 
     if declared.as_u8() >= estimate.tier.as_u8() {
         return DeclarationVerdict::AtOrAboveFloor;
     }
+    let raised_by = floor_raising_axes(estimate);
+    let raised_by_combo_floor = estimate
+        .combo_checks
+        .iter()
+        .rev()
+        .find(|check| {
+            check.outcome == BracketCheckOutcome::Fired
+                && check.floor.as_u8() == estimate.tier.as_u8()
+        })
+        .map(|check| check.trigger);
+    let raised_by_declared_combo = estimate.combo_barometer.floor == Some(estimate.tier);
+    if raised_by.is_empty() && raised_by_combo_floor.is_none() && !raised_by_declared_combo {
+        // Only `BASE_FLOOR` can stand unraised: nothing in the deck establishes it.
+        return DeclarationVerdict::AtOrAboveFloor;
+    }
     DeclarationVerdict::BelowFloor {
         floor: estimate.tier,
-        raised_by: floor_raising_axes(estimate),
-        raised_by_combo_floor: estimate
-            .combo_checks
-            .iter()
-            .rev()
-            .find(|check| {
-                check.outcome == BracketCheckOutcome::Fired
-                    && check.floor.as_u8() == estimate.tier.as_u8()
-            })
-            .map(|check| check.trigger),
+        raised_by,
+        raised_by_combo_floor,
     }
 }
 
@@ -1012,24 +1014,46 @@ mod tests {
     use strum::IntoEnumIterator;
 
     #[test]
-    fn effective_tier_truth_table() {
-        let estimated = std::iter::once(None)
-            .chain(CommanderBracketTier::iter().map(Some))
-            .collect::<Vec<_>>();
+    fn a_declaration_below_the_estimate_is_final() {
+        assert_eq!(
+            effective_tier(
+                Some(CommanderBracketTier::Core),
+                Some(CommanderBracketTier::Optimized)
+            )
+            .tier(),
+            CommanderBracketTier::Core
+        );
+    }
 
-        let mut rows = 0;
-        for declared in CommanderBracketTier::iter() {
-            for estimate in &estimated {
-                let expected = match estimate {
-                    Some(floor) if floor.as_u8() > declared.as_u8() => *floor,
-                    Some(_) | None => declared,
-                };
-                assert_eq!(effective_tier(declared, *estimate).tier(), expected);
-                rows += 1;
-            }
+    #[test]
+    fn a_declaration_above_the_estimate_is_final() {
+        assert_eq!(
+            effective_tier(
+                Some(CommanderBracketTier::Cedh),
+                Some(CommanderBracketTier::Optimized)
+            )
+            .tier(),
+            CommanderBracketTier::Cedh
+        );
+    }
+
+    #[test]
+    fn an_undeclared_deck_plays_at_its_estimate() {
+        for estimate in CommanderBracketTier::iter() {
+            assert_eq!(effective_tier(None, Some(estimate)).tier(), estimate);
         }
+    }
 
-        assert_eq!(rows, 30);
+    #[test]
+    fn a_deck_with_neither_plays_at_core() {
+        assert_eq!(
+            effective_tier(None, None).tier(),
+            CommanderBracketTier::Core
+        );
+        assert_eq!(
+            effective_tier(Some(CommanderBracketTier::Exhibition), None).tier(),
+            CommanderBracketTier::Exhibition
+        );
     }
 
     fn db_with_signals(entries: &[(&str, BracketSignals)]) -> CardDatabase {
@@ -1578,6 +1602,48 @@ mod tests {
     }
 
     #[test]
+    fn exhibition_over_the_unraised_base_floor_is_at_or_above() {
+        let estimate = estimate_bracket(
+            &deck(vec!["Cmdr"], vec!["Forest"]),
+            &db_with_signals(&[]),
+            &ComboTable::default(),
+        )
+        .unwrap();
+
+        assert_eq!(estimate.tier, BASE_FLOOR);
+        assert_eq!(
+            reconcile(CommanderBracketTier::Exhibition, &estimate),
+            DeclarationVerdict::AtOrAboveFloor
+        );
+    }
+
+    #[test]
+    fn exhibition_over_an_extra_turn_card_is_below_the_core_floor() {
+        let db = db_with_signals(&[(
+            "Time Warp",
+            BracketSignals {
+                extra_turn: true,
+                ..Default::default()
+            },
+        )]);
+        let estimate = estimate_bracket(
+            &deck(vec!["Cmdr"], vec!["Time Warp"]),
+            &db,
+            &ComboTable::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reconcile(CommanderBracketTier::Exhibition, &estimate),
+            DeclarationVerdict::BelowFloor {
+                floor: CommanderBracketTier::Core,
+                raised_by: vec![BracketAxis::ExtraTurns],
+                raised_by_combo_floor: None,
+            }
+        );
+    }
+
+    #[test]
     fn declaration_above_floor_is_at_or_above() {
         let estimate = estimate_bracket(
             &deck(vec!["Cmdr"], vec!["Forest"]),
@@ -1614,7 +1680,7 @@ mod tests {
             serde_json::from_str(r#"{"main_deck":[],"commander":["Cmdr"]}"#).unwrap();
 
         assert_eq!(request.declared_tier, None);
-        assert_eq!(bare_deck.bracket_tier, CommanderBracketTier::Core);
+        assert_eq!(bare_deck.bracket_tier, None);
     }
 
     #[test]

@@ -750,7 +750,7 @@ mod cedh_registration_tests {
     fn cedh_floor_force_keep_overrides_force_mulligan_in_registry() {
         let cedh_features = DeckFeatures {
             effective_bracket_tier: engine::game::bracket_estimate::effective_tier(
-                CommanderBracketTier::Cedh,
+                Some(CommanderBracketTier::Cedh),
                 None,
             ),
             ..DeckFeatures::default()

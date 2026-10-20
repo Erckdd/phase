@@ -1453,19 +1453,19 @@ mod tests {
         state.deck_pools = vec![
             PlayerDeckPool {
                 player: PlayerId(0),
-                bracket_tier: CommanderBracketTier::Core,
+                bracket_tier: Some(CommanderBracketTier::Core),
                 current_main: std::sync::Arc::new(vec![entry("P0", 1)]),
                 ..Default::default()
             },
             PlayerDeckPool {
                 player: PlayerId(1),
-                bracket_tier: CommanderBracketTier::Optimized,
+                bracket_tier: Some(CommanderBracketTier::Optimized),
                 current_main: std::sync::Arc::new(vec![entry("P1", 1)]),
                 ..Default::default()
             },
             PlayerDeckPool {
                 player: PlayerId(2),
-                bracket_tier: CommanderBracketTier::Cedh,
+                bracket_tier: Some(CommanderBracketTier::Cedh),
                 current_main: std::sync::Arc::new(vec![entry("AI", 1)]),
                 ..Default::default()
             },
@@ -1476,7 +1476,7 @@ mod tests {
 
         assert_eq!(
             payload.player.bracket_tier,
-            CommanderBracketTier::Core,
+            Some(CommanderBracketTier::Core),
             "player seat bracket_tier must round-trip"
         );
         assert!(
@@ -1485,7 +1485,7 @@ mod tests {
         );
         assert_eq!(
             payload.opponent.bracket_tier,
-            CommanderBracketTier::Optimized,
+            Some(CommanderBracketTier::Optimized),
             "opponent seat bracket_tier must round-trip"
         );
         assert_eq!(
@@ -1495,7 +1495,7 @@ mod tests {
         );
         assert_eq!(
             payload.ai_decks[0].bracket_tier,
-            CommanderBracketTier::Cedh,
+            Some(CommanderBracketTier::Cedh),
             "AI seat bracket_tier (Cedh) must be propagated — not silently dropped"
         );
     }

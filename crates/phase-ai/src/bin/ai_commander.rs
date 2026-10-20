@@ -141,7 +141,9 @@ struct CliArgs {
     feed: String,
     seed: u64,
     difficulty: AiDifficulty,
-    bracket: CommanderBracketTier,
+    /// `--bracket`: the declaration stamped on every deck that declares none.
+    /// `None` leaves those decks undeclared, so each plays at its estimate.
+    bracket: Option<CommanderBracketTier>,
     seats: [SeatOverride; 4],
     action_cap: usize,
     games_file: Option<String>,
@@ -195,7 +197,7 @@ fn parse_cli(args: &[String], measurement_env: bool) -> Result<CliArgs, String> 
 
     let mut seed: u64 = 42;
     let mut difficulty = AiDifficulty::Easy;
-    let mut bracket = CommanderBracketTier::Core;
+    let mut bracket = None;
     let mut seats: [SeatOverride; 4] = std::array::from_fn(|_| SeatOverride::default());
     let mut action_cap: usize = DEFAULT_ACTION_CAP;
     let mut feed: String = "feeds/mtggoldfish-commander.json".to_string();
@@ -224,7 +226,7 @@ fn parse_cli(args: &[String], measurement_env: bool) -> Result<CliArgs, String> 
                 }
             }
             "--bracket" => match args_iter.next() {
-                Some(value) => bracket = parse_bracket(value)?,
+                Some(value) => bracket = Some(parse_bracket(value)?),
                 None => return Err("error: --bracket requires a bracket label".to_string()),
             },
             "--action-cap" => {
@@ -504,7 +506,7 @@ fn run(cli: CliArgs) -> i32 {
     let mut labels = Vec::with_capacity(4);
     let mut deck_lists = Vec::with_capacity(4);
     for (index, seat) in seat_overrides.iter().enumerate() {
-        let (label, mut list, carries_tier) = match &seat.deck {
+        let (label, mut list) = match &seat.deck {
             Some(path) => load_explicit_deck(path).unwrap_or_else(|error| {
                 eprintln!("{error}");
                 std::process::exit(1);
@@ -514,15 +516,10 @@ fn run(cli: CliArgs) -> i32 {
                     eprintln!("need a resolvable feed deck for seat P{index}");
                     std::process::exit(1);
                 });
-                (deck.label, deck.list, false)
+                (deck.label, deck.list)
             }
         };
-        if !carries_tier {
-            list.bracket_tier = bracket;
-        }
-        if let Some(tier) = seat.tier {
-            list.bracket_tier = tier;
-        }
+        list.bracket_tier = seat.tier.or(list.bracket_tier).or(bracket);
         println!(
             "  {label}  |  commander: {}  |  main: {} cards",
             list.commander.first().map_or("<none>", String::as_str),
@@ -743,20 +740,17 @@ fn run_games(
     }
 }
 
-fn load_explicit_deck(path: &std::path::Path) -> Result<(String, PlayerDeckList, bool), String> {
+fn load_explicit_deck(path: &std::path::Path) -> Result<(String, PlayerDeckList), String> {
     let bytes = std::fs::read(path)
         .map_err(|error| format!("failed to read deck {}: {error}", path.display()))?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("failed to parse deck {}: {error}", path.display()))?;
-    let carries_tier = value.get("bracket_tier").is_some();
-    let list: PlayerDeckList = serde_json::from_value(value)
+    let list: PlayerDeckList = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid deck {}: {error}", path.display()))?;
     let label = if list.commander.is_empty() {
         "unnamed-seat-deck".to_string()
     } else {
         list.commander.join(" + ")
     };
-    Ok((label, list, carries_tier))
+    Ok((label, list))
 }
 
 fn pre_screen_decks(
@@ -880,7 +874,9 @@ fn play_one_game(context: &GameRunContext<'_>, seed: u64, difficulty: AiDifficul
         let seat_diff = seat_overrides[i].difficulty.unwrap_or(difficulty);
         println!(
             "  P{i}  difficulty={seat_diff:?}  bracket={}  deck={}",
-            seat.tier, seat.label
+            seat.tier
+                .map_or_else(|| "undeclared".to_string(), |tier| tier.to_string()),
+            seat.label
         );
         ai_configs.insert(
             PlayerId(i as u8),

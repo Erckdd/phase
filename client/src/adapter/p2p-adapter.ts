@@ -182,7 +182,7 @@ interface DeckSeatPayload {
   signature_spell?: string[];
   planar_deck?: string[];
   scheme_deck?: string[];
-  bracket_tier?: CommanderBracketTier;
+  bracket_tier?: CommanderBracketTier | null;
 }
 
 interface DeckListPayload {
