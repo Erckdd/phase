@@ -31,7 +31,14 @@ export interface AiDeckCandidate {
   knownFormat?: GameFormat;
   coveragePct: number | null;
   archetype: DeckArchetype | null;
+  /** Bracket the pool filters on: the declared tag, else the engine's estimate. */
   bracket: CommanderBracket | null;
+  /**
+   * The tag a curator or the deck's owner declared, or `null`. Seats send this,
+   * never `bracket`, so an untagged deck reaches the engine undeclared and plays
+   * at the engine's own estimate.
+   */
+  declaredBracket: CommanderBracket | null;
 }
 
 export interface AiDeckCatalogOptions {
@@ -92,7 +99,7 @@ export function catalogRequestKey(
  * manual-only), so a manual tag above it is expected, not a conflict.
  *
  * Pre-game metadata only: the value filters the candidate pool and never
- * reaches the Rust game loop. The estimate is meaningful only for the
+ * reaches the Rust game loop (seats send `declaredBracket`). The estimate is meaningful only for the
  * Commander family (CR 903), so non-Commander formats and decks with no
  * commander short-circuit to `null`.
  */
@@ -141,7 +148,7 @@ async function legalCandidate(
   if (result.selected_format_compatible !== true) return null;
   return {
     ...candidate,
-    bracket: await resolveBracket(candidate.deck, candidate.bracket, options.selectedFormat ?? undefined),
+    bracket: await resolveBracket(candidate.deck, candidate.declaredBracket, options.selectedFormat ?? undefined),
     coveragePct: result.coverage && result.coverage.total_unique > 0
       ? Math.round((result.coverage.supported_unique / result.coverage.total_unique) * 100)
       : candidate.coveragePct,
@@ -178,6 +185,7 @@ export async function buildLegalAiDeckCatalog(
     coveragePct: candidate.coveragePct ?? null,
     archetype: null,
     bracket: candidate.bracket ?? null,
+    declaredBracket: candidate.bracket ?? null,
     knownFormat: candidate.knownFormat,
   }));
 

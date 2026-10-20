@@ -470,7 +470,7 @@ async function buildLocalAiDeckList(
       );
     }
     playerDeck = playerPick.deck;
-    resolvedPlayerBracket = playerPick.bracket;
+    resolvedPlayerBracket = playerPick.declaredBracket;
     excludeIds.add(playerPick.id);
   }
 
@@ -494,8 +494,8 @@ async function buildLocalAiDeckList(
   const aiDifficulties = seats.map((seat) => seat.difficulty);
   return {
     player: { ...playerExpanded, bracket_tier: playerTier, combo_declaration: comboDeclaration },
-    opponent: { ...expandParsedDeck(picks[0].deck), bracket_tier: bracketToEngineTier(picks[0].bracket) },
-    ai_decks: picks.slice(1).map((c) => ({ ...expandParsedDeck(c.deck), bracket_tier: bracketToEngineTier(c.bracket) })),
+    opponent: { ...expandParsedDeck(picks[0].deck), bracket_tier: bracketToEngineTier(picks[0].declaredBracket) },
+    ai_decks: picks.slice(1).map((c) => ({ ...expandParsedDeck(c.deck), bracket_tier: bracketToEngineTier(c.declaredBracket) })),
     ai_difficulties: aiDifficulties,
   };
 }

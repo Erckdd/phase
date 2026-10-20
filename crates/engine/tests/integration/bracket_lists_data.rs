@@ -52,6 +52,22 @@ fn every_wotc_source_has_a_readable_local_copy() {
             archive.display()
         );
     }
+    // The fetch script writes `docs/bracket-sources/<slug>.txt` for every slug in
+    // the tracked source manifest, so each local copy must name one of those.
+    let manifest: serde_json::Value = serde_json::from_reader(
+        std::fs::File::open(root.join("data/bracket_sources.json"))
+            .expect("tracked bracket source manifest should open"),
+    )
+    .expect("tracked bracket source manifest should parse");
+    let fetched: BTreeSet<String> = manifest["sources"]
+        .as_array()
+        .expect("the manifest lists its sources")
+        .iter()
+        .map(|source| {
+            let slug = source["slug"].as_str().expect("every source has a slug");
+            format!("docs/bracket-sources/{slug}.txt")
+        })
+        .collect();
     let lists = load_lists();
     for class in BracketCardClass::ALL {
         let source = &lists.get(class).expect("all six classes must exist").source;
@@ -67,8 +83,8 @@ fn every_wotc_source_has_a_readable_local_copy() {
                     .as_deref()
                     .expect("WotC sources must have an archived local copy");
                 assert!(
-                    path.starts_with("docs/bracket-sources/"),
-                    "{class:?} local copy {path} must live in the fetched archive"
+                    fetched.contains(path),
+                    "{class:?} local copy {path} is not a file the fetch script writes"
                 );
                 if archived {
                     assert!(root.join(path).exists(), "missing local copy {path}");

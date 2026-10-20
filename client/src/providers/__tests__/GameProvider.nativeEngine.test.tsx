@@ -371,6 +371,7 @@ function aiCandidate(id: string, main: string[], bracket: CommanderBracket | nul
     coveragePct: 100,
     archetype: null,
     bracket,
+    declaredBracket: bracket,
   };
 }
 

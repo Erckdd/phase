@@ -63,6 +63,7 @@ function candidate(
     coveragePct: 100,
     archetype: null,
     bracket: null,
+    declaredBracket: overrides.bracket ?? null,
     ...overrides,
   };
 }
@@ -277,7 +278,12 @@ describe("HostSetup — per-seat AI decks", () => {
   it("carries each picked deck's declared bracket tier onto the seat payload", async () => {
     const user = userEvent.setup();
     rememberTwoAiSeats();
-    catalogState.candidates = [candidate("Alpha", { bracket: 5 }), BRAVO];
+    // Bravo's filter bracket is an estimate, not a declaration: the seat stays
+    // undeclared so the engine plays it at its own estimate.
+    catalogState.candidates = [
+      candidate("Alpha", { bracket: 5 }),
+      candidate("Bravo", { bracket: 3, declaredBracket: null }),
+    ];
     const onHost = renderHostSetup();
 
     await waitFor(() => expect(deckPickers()).toHaveLength(2));

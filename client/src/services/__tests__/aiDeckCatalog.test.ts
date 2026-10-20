@@ -275,6 +275,7 @@ describe("buildLegalAiDeckCatalog", () => {
 
     const candidate = catalog.candidates.find((c) => c.id === "saved:Tagged Commander");
     expect(candidate?.bracket).toBe(4);
+    expect(candidate?.declaredBracket).toBe(4);
   });
 
   it("falls back to the engine bracket estimate for untagged Commander decks", async () => {
@@ -292,6 +293,8 @@ describe("buildLegalAiDeckCatalog", () => {
 
     const candidate = catalog.candidates.find((c) => c.id === "saved:Estimated Commander");
     expect(candidate?.bracket).toBe(4); // "optimized" → 4
+    // The estimate only filters the pool; the seat stays undeclared.
+    expect(candidate?.declaredBracket).toBeNull();
   });
 
   it("leaves an untagged deck null when card data is unavailable", async () => {
@@ -520,6 +523,7 @@ function savedSettleCandidate(
     coveragePct: null,
     archetype: null,
     bracket,
+    declaredBracket: bracket,
   };
 }
 
@@ -653,6 +657,7 @@ function makeCandidate(id: string, bracket: AiDeckCandidate["bracket"]): AiDeckC
     coveragePct: null,
     archetype: null,
     bracket,
+    declaredBracket: bracket,
   };
 }
 

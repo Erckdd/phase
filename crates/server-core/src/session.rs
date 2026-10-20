@@ -10220,7 +10220,7 @@ mod tests {
     #[test]
     fn a_client_emitted_host_deck_without_a_declared_tier_is_refused_at_cedh() {
         // Paired negative isolating the host payload: the pre-fix host deck
-        // omitted `bracket_tier`, which deserializes to Core.
+        // omitted `bracket_tier`, which deserializes to undeclared (`None`).
         let db = lands_db();
         let (mgr, code) = client_emitted_cedh_table(&db, None, Some("cedh"));
 

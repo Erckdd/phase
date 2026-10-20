@@ -43,9 +43,9 @@ pub enum CommanderBracketTier {
 }
 
 impl Default for CommanderBracketTier {
-    /// Default to `Core` (B2) — the most common casual tier and the
-    /// value used by all legacy construction sites that predate the
-    /// `bracket_tier` field on `PlayerDeckPool`.
+    /// Default to `Core` (B2) — the most common casual tier, and the tier
+    /// [`effective_tier`] falls back to for a deck with neither a declaration
+    /// nor an estimate.
     fn default() -> Self {
         Self::Core
     }
@@ -1614,6 +1614,24 @@ mod tests {
         assert_eq!(
             reconcile(CommanderBracketTier::Exhibition, &estimate),
             DeclarationVerdict::AtOrAboveFloor
+        );
+    }
+
+    #[test]
+    fn a_declaration_under_the_owners_declared_combo_floor_is_below_it() {
+        let mut combo_deck = deck(vec!["Cmdr"], vec!["Forest"]);
+        combo_deck.combo_declaration = ComboDeclaration::Intended { window: None };
+        let estimate =
+            estimate_bracket(&combo_deck, &db_with_signals(&[]), &ComboTable::default()).unwrap();
+
+        assert_eq!(estimate.tier, CommanderBracketTier::Upgraded);
+        assert_eq!(
+            reconcile(CommanderBracketTier::Core, &estimate),
+            DeclarationVerdict::BelowFloor {
+                floor: CommanderBracketTier::Upgraded,
+                raised_by: Vec::new(),
+                raised_by_combo_floor: None,
+            }
         );
     }
 
