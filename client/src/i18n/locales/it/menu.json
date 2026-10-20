@@ -117,10 +117,11 @@
     "coverageThresholdHint": "Escludi i mazzi sotto questa soglia di supporto del motore",
     "bracket": "Bracket",
     "bracketHint": "L'IA casuale sceglie da questi bracket. I mazzi senza etichetta sono esclusi durante il filtraggio.",
+    "bracketPoolEmpty": "Nessun mazzo corrisponde ai bracket selezionati. L'IA casuale sceglierà tra tutti i mazzi legali.",
+    "cedhPoolEmpty": "Nessun mazzo bracket 5 disponibile. Non è possibile assegnare mazzi all'IA casuale.",
     "opponentLabel": "Avversario {{number}}",
     "deck": "Mazzo",
     "difficulty": "Difficoltà",
-    "difficultyDefault": "Predefinita ({{difficulty}})",
     "deckRandom": "Casuale",
     "deckRandomCount": "Casuale ({{count}})",
     "cedhToggle": {
@@ -133,27 +134,20 @@
       "user": "Utente",
       "precon": "Precon"
     },
-    "podRelaxation": {
-      "heading": "Adattamenti del pod",
-      "bracketDistance": "Posto {{seat}} — non era disponibile un mazzo del bracket richiesto; è stato assegnato un mazzo di Bracket {{tier}}.",
-      "bracketDistanceNoTier": "Posto {{seat}} — non era disponibile un mazzo del bracket richiesto; è stato assegnato un mazzo senza etichetta.",
-      "labelProvenance": "Posto {{seat}} — non era disponibile un mazzo con bracket dichiarato; è stato assegnato un mazzo con bracket stimato.",
-      "archetype": "Posto {{seat}} — non era disponibile un mazzo dell'archetipo richiesto.",
-      "distinctColorIdentity": "Posto {{seat}} — condivide un'identità di colore con un altro posto.",
-      "distinctCommander": "Posto {{seat}} — condivide un comandante con un altro posto."
-    },
-    "podPreviewCount": "{{n}} mazzi corrispondono alle impostazioni attuali del pod",
     "brain": "Controllato da",
-    "brainEngine": "IA del motore"
+    "brainEngine": "IA del motore",
+    "poolBracketConflict": "Nessuno degli {{selected}} mazzi selezionati è legale con i filtri attuali, quindi gli avversari casuali pescano da tutti gli {{total}} mazzi."
   },
-  "gameProvider": {
-    "podSelectionRefused": {
-      "insufficientCandidates": "Mazzi distinti insufficienti: richiesti {{requested}} posti, {{available}} disponibili.",
-      "hardGateUnsatisfiable": "Mazzi cEDH insufficienti per un tavolo cEDH: richiesti {{requested}} posti, {{available}} disponibili.",
-      "tooManySeats": "Un tavolo cEDH può ospitare al massimo quattro giocatori (richiesti {{seats}} posti IA).",
-      "unknownCommander": "Il catalogo dei mazzi indica un comandante sconosciuto ai dati delle carte: {{name}}.",
-      "cardDataUnavailable": "La selezione dei posti IA richiede i dati delle carte, che non sono ancora stati caricati."
-    }
+  "randomPool": {
+    "titleHuman": "Il tuo pool casuale",
+    "titleAi": "Pool casuale dell'IA",
+    "hint": "Deseleziona cartelle o mazzi per rimuoverli dalle scelte casuali.",
+    "count": "{{selected}} di {{total}}",
+    "emptyWarning": "Tutto è escluso, quindi Casuale pesca da tutti gli {{total}} mazzi.",
+    "reset": "Reimposta",
+    "precons": "Precon",
+    "playable": "{{playable}} giocabili",
+    "nonePlayable": "Nessuno degli {{selected}} mazzi selezionati è legale con i filtri attuali, quindi Casuale pesca da tutti gli {{total}} mazzi."
   },
   "feedManager": {
     "title": "Gestisci feed",
@@ -316,7 +310,8 @@
     "sectionStarred": "Preferiti",
     "sectionUnfiled": "Senza cartella",
     "collapseAll": "Comprimi tutto",
-    "expandAll": "Espandi tutto"
+    "expandAll": "Espandi tutto",
+    "poolBracketConflict": "Nessuno degli {{selected}} mazzi selezionati è legale con i filtri attuali, quindi il tuo mazzo casuale sarà pescato da tutti gli {{total}} mazzi."
   },
   "subscriptions": {
     "emptyTitle": "Nessuna iscrizione ai feed",
@@ -382,5 +377,9 @@
       "ai": "AI",
       "multiplayer": "Multiplayer"
     }
+  },
+  "pileSource": {
+    "label": "Mazzo",
+    "default": "Mazzo predefinito"
   }
 }

@@ -1,3 +1,5 @@
+import type { CommanderBracket } from "./bracket";
+
 export type CommanderBracketTier =
   | "exhibition"
   | "core"
@@ -246,6 +248,18 @@ export const BRACKET_TIER_BY_NUMERIC: Record<1 | 2 | 3 | 4 | 5, CommanderBracket
   4: "optimized",
   5: "cedh",
 };
+
+/**
+ * Convert the numeric `CommanderBracket` (1–5) stored on deck metadata into the
+ * lowercase string tier the Rust engine expects on `PlayerDeckList.bracket_tier`.
+ *
+ * Uses `BRACKET_TIER_BY_NUMERIC`.
+ * Returns `"core"` (the engine's `Default`) for any unrecognised value so
+ * that missing or invalid tags degrade safely.
+ */
+export function bracketToEngineTier(bracket: CommanderBracket | null | undefined): CommanderBracketTier {
+  return (bracket == null ? undefined : BRACKET_TIER_BY_NUMERIC[bracket]) ?? "core";
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";

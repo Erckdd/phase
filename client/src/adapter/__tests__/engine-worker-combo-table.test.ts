@@ -43,7 +43,6 @@ vi.mock("@wasm/engine", () => {
     "export_game_state_json",
     "clear_game_state",
     "set_multiplayer_mode",
-    "selectAiPod",
     "deck_signals_for_deck",
     "has_replay_recording",
     "export_replay_log",

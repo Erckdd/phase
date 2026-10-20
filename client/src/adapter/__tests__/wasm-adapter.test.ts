@@ -22,6 +22,7 @@ import type {
   SubmitResult,
 } from "../types";
 import { AdapterError, AdapterErrorCode } from "../types";
+import { PLAYER_ID } from "../../constants/game";
 import { buildGameState, gameStateFactory } from "../../test/factories/gameStateFactory";
 
 const ensureWasmInit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -38,6 +39,7 @@ const initializeMultiplayerHostGameJs = vi.hoisted(() =>
 );
 const getGameStateJs = vi.hoisted(() => vi.fn());
 const getLegalActionsJs = vi.hoisted(() => vi.fn());
+const getLegalActionsForViewerJs = vi.hoisted(() => vi.fn());
 const getViewerTransitionSnapshotJs = vi.hoisted(() => vi.fn());
 const setMultiplayerModeJs = vi.hoisted(() => vi.fn());
 const clearGameStateJs = vi.hoisted(() => vi.fn());
@@ -58,6 +60,7 @@ vi.mock("@wasm/engine", () => ({
   initialize_multiplayer_host_game: initializeMultiplayerHostGameJs,
   get_game_state: getGameStateJs,
   get_legal_actions_js: getLegalActionsJs,
+  get_legal_actions_for_viewer_js: getLegalActionsForViewerJs,
   get_viewer_transition_snapshot_js: getViewerTransitionSnapshotJs,
   set_multiplayer_mode: setMultiplayerModeJs,
   clear_game_state: clearGameStateJs,
@@ -77,7 +80,6 @@ const mockWorkerClient = {
       color_distribution: [],
     }),
   estimateBracketForDeck: vi.fn().mockResolvedValue(null),
-  selectAiPod: vi.fn().mockResolvedValue({ ok: { seats: [], relaxations: [] } }),
   deckSignalsForDeck: vi.fn().mockResolvedValue(null),
   evaluateDeckFormatGate: vi.fn().mockResolvedValue({ compatible: true, reasons: [] }),
   customFormatFromLobbyConfig: vi.fn().mockResolvedValue({ label: "My Format" }),
@@ -109,6 +111,7 @@ const mockWorkerClient = {
     phase: "Untap",
   })),
   getLegalActions: vi.fn().mockResolvedValue({ actions: [], autoPassRecommended: false }),
+  getSnapshot: vi.fn(),
   getViewerTransitionSnapshot: vi.fn(),
   exportState: vi.fn().mockResolvedValue("{}"),
   restoreState: vi.fn().mockResolvedValue(undefined),
@@ -165,6 +168,7 @@ describe("WasmAdapter", () => {
     });
     getGameStateJs.mockReturnValue(buildGameState());
     getLegalActionsJs.mockReturnValue({ actions: [], autoPassRecommended: false });
+    getLegalActionsForViewerJs.mockReturnValue({ actions: [], autoPassRecommended: false });
     const restored = {
       presentation: {
         outcome: "noop" as const,
@@ -605,26 +609,6 @@ describe("WasmAdapter", () => {
     });
   });
 
-  describe("selectAiPod", () => {
-    it("selectAiPod rejects and never calls the worker when the card DB is not loaded", async () => {
-      mockWorkerClient.loadCardDbFromUrl.mockRejectedValueOnce(new Error("card DB error"));
-      const request = {
-        allowed: [],
-        prefer: null,
-        enforcement: "advisory" as const,
-        seats: 1,
-        constraints: [],
-        coverage_floor_pct: 0,
-        archetype: null,
-        seed: 7,
-        occupied: [],
-      };
-
-      await expect(adapter.selectAiPod([], request)).rejects.toThrow("card DB error");
-      expect(mockWorkerClient.selectAiPod).not.toHaveBeenCalled();
-    });
-  });
-
   describe("deckSignals", () => {
     it("deckSignals rejects and never calls the worker when the card DB is not loaded", async () => {
       mockWorkerClient.loadCardDbFromUrl.mockRejectedValueOnce(new Error("card DB error"));
@@ -1023,6 +1007,7 @@ describe("WasmAdapter", () => {
       expect(mockWorkerClient.loadCardDbFromUrl).toHaveBeenCalledOnce();
       expect(mockWorkerClient.resumeMultiplayerHostState).toHaveBeenCalledWith(
         JSON.stringify(mockState),
+        PLAYER_ID,
       );
       expect(mockWorkerClient.loadCardDbFromUrl.mock.invocationCallOrder[0])
         .toBeLessThan(
@@ -1057,6 +1042,61 @@ describe("WasmAdapter", () => {
         "resume failed",
       );
       expect(resumeMultiplayerHostState).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("local-seat legal actions", () => {
+    const seatList = { actions: [], autoPassRecommended: false, seat: PLAYER_ID };
+
+    it("asks the worker for the local seat's own list on every read", async () => {
+      await adapter.initialize();
+      mockWorkerClient.getSnapshot.mockResolvedValue({
+        state: buildGameState(),
+        legalResult: seatList,
+      });
+
+      await adapter.getLegalActions();
+      await adapter.getSnapshot();
+      await adapter.resumeRestoredGameState();
+      await adapter.resumeMultiplayerHostState(buildGameState());
+
+      expect(mockWorkerClient.getLegalActions).toHaveBeenCalledWith(PLAYER_ID);
+      expect(mockWorkerClient.getSnapshot).toHaveBeenCalledWith(PLAYER_ID);
+      expect(mockWorkerClient.resumeRestoredGameState).toHaveBeenCalledWith(PLAYER_ID);
+      expect(mockWorkerClient.resumeMultiplayerHostState).toHaveBeenCalledWith(
+        expect.any(String),
+        PLAYER_ID,
+      );
+    });
+
+    it("main-thread fallback reads the viewer-scoped export, never the seat-agnostic one", async () => {
+      mockWorkerClient.initialize.mockRejectedValueOnce(new Error("worker unavailable"));
+      getLegalActionsForViewerJs.mockReturnValue(seatList);
+      resumeRestoredGameState.mockReturnValue({
+        outcome: "noop",
+        automatedResolutionCount: 0,
+        omittedEventCount: 0,
+        logEntries: [],
+      });
+      resumeMultiplayerHostState.mockReturnValue({
+        outcome: "noop",
+        automatedResolutionCount: 0,
+        omittedEventCount: 0,
+        logEntries: [],
+      });
+      await adapter.initialize();
+
+      const lists = [
+        await adapter.getLegalActions(),
+        (await adapter.getSnapshot()).legalResult,
+        (await adapter.resumeRestoredGameState()).snapshot.legalResult,
+        (await adapter.resumeMultiplayerHostState(buildGameState())).snapshot.legalResult,
+      ];
+
+      expect(lists).toEqual(Array(4).fill(seatList));
+      expect(getLegalActionsForViewerJs).toHaveBeenCalledTimes(4);
+      expect(getLegalActionsForViewerJs).toHaveBeenCalledWith(PLAYER_ID);
+      expect(getLegalActionsJs).not.toHaveBeenCalled();
     });
   });
 

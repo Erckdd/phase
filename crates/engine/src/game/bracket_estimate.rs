@@ -4,6 +4,13 @@
 //! two-card-combo declaration, and returns a `BracketEstimate` placing the deck
 //! in bracket B2–B4.
 //!
+//! The estimate is a **floor**, not an exact tier: a deck with no Game
+//! Changers still estimates B2 even if its pilot would call it B3 — only
+//! the pilot can declare upward. B1 (Exhibition) and B5 (cEDH) are
+//! manual self-declarations the estimator never returns: Exhibition depends
+//! on the pilot's theme and intended play experience, which card counts
+//! cannot establish; cEDH reflects participation in the competitive metagame.
+//!
 //! Pure: no game state, no I/O, no randomness. Same `(deck, db, combo_table)`
 //! → identical `BracketEstimate`.
 //!
@@ -22,8 +29,9 @@ use crate::database::{
 use crate::game::deck_loading::PlayerDeckList;
 use crate::types::ability::Comparator;
 
-/// Commander bracket tier. The estimator never returns `Cedh` — that is a
-/// meta self-declaration kept on the frontend's existing manual picker.
+/// Commander bracket tier. The estimator returns only `Core`–`Optimized`
+/// (B2–B4). `Exhibition` and `Cedh` are manual self-declarations kept on
+/// the frontend's existing manual picker — the estimator never returns them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::EnumIter)]
 #[serde(rename_all = "snake_case")]
 pub enum CommanderBracketTier {

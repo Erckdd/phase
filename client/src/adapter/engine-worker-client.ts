@@ -9,6 +9,7 @@ import type {
   AiDecisionDiagnosticReceipt,
   AiLlmProposalResult,
   AiProposalSubmission,
+  ContestDriveResult,
   FormatConfig,
   GameAction,
   GameEvent,
@@ -38,11 +39,6 @@ import type {
   BracketEstimateRequest,
 } from "../types/bracketEstimate";
 import type { DeckSignals } from "../types/deckSignals";
-import type {
-  AiDeckCandidateWire,
-  PodSelectionRequest,
-  PodSelectionResult,
-} from "../types/podSelection";
 import { debugLog } from "../game/debugLog";
 import { notifyEngineSlow } from "../game/engineRecovery";
 
@@ -334,6 +330,18 @@ export class EngineWorkerClient {
     );
   }
 
+  async driveContest(
+    nowMs: number,
+    aiPlayers: number[],
+    awayPlayers: number[],
+    clicks: unknown[],
+  ): Promise<ContestDriveResult> {
+    return this.request<ContestDriveResult>(
+      { type: "driveContest", nowMs, aiPlayers, awayPlayers, clicks },
+      ENGINE_REQUEST_TIMEOUT_MS,
+    );
+  }
+
   async submitInteraction(actor: number, submission: InteractionSubmission): Promise<SubmitResult> {
     return this.request<SubmitResult>(
       { type: "submitInteraction", actor, submission },
@@ -369,9 +377,9 @@ export class EngineWorkerClient {
     );
   }
 
-  async getLegalActions(): Promise<LegalActionsResult> {
+  async getLegalActions(viewerId: number): Promise<LegalActionsResult> {
     return this.request<LegalActionsResult>(
-      { type: "getLegalActions" },
+      { type: "getLegalActions", viewerId },
       ENGINE_REQUEST_TIMEOUT_MS,
     );
   }
@@ -382,9 +390,9 @@ export class EngineWorkerClient {
    * Same timeout class as `getState`. The caller (`WasmAdapter.getSnapshot`)
    * stamps the `seq` on arrival.
    */
-  async getSnapshot(): Promise<{ state: GameState; legalResult: LegalActionsResult }> {
+  async getSnapshot(viewerId: number): Promise<{ state: GameState; legalResult: LegalActionsResult }> {
     return this.request<{ state: GameState; legalResult: LegalActionsResult }>(
-      { type: "getSnapshot" },
+      { type: "getSnapshot", viewerId },
       ENGINE_REQUEST_TIMEOUT_MS,
     );
   }
@@ -546,8 +554,8 @@ export class EngineWorkerClient {
     await this.request<null>({ type: "restoreState", stateJson });
   }
 
-  async resumeRestoredGameState(): Promise<RestoredWorkerResult> {
-    return this.request<RestoredWorkerResult>({ type: "resumeRestoredGameState" });
+  async resumeRestoredGameState(viewerId: number): Promise<RestoredWorkerResult> {
+    return this.request<RestoredWorkerResult>({ type: "resumeRestoredGameState", viewerId });
   }
 
   /**
@@ -557,8 +565,8 @@ export class EngineWorkerClient {
    * flips the engine's multiplayer flag. Mirrors server-core's
    * `GameSession::from_persisted`.
    */
-  async resumeMultiplayerHostState(stateJson: string): Promise<RestoredWorkerResult> {
-    return this.request<RestoredWorkerResult>({ type: "resumeMultiplayerHostState", stateJson });
+  async resumeMultiplayerHostState(stateJson: string, viewerId: number): Promise<RestoredWorkerResult> {
+    return this.request<RestoredWorkerResult>({ type: "resumeMultiplayerHostState", stateJson, viewerId });
   }
 
   async resetGame(): Promise<void> {
@@ -607,13 +615,6 @@ export class EngineWorkerClient {
 
   async estimateBracketForDeck(request: BracketEstimateRequest): Promise<unknown> {
     return this.request<unknown>({ type: "estimateBracketForDeck", request });
-  }
-
-  async selectAiPod(
-    candidates: AiDeckCandidateWire[],
-    request: PodSelectionRequest,
-  ): Promise<PodSelectionResult> {
-    return this.request<PodSelectionResult>({ type: "selectAiPod", candidates, request });
   }
 
   async deckSignalsForDeck(deck: BracketDeckRequest): Promise<DeckSignals | null> {

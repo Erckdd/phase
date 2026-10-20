@@ -1,14 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook, waitFor } from "@testing-library/react";
 
 import type { DeckCompatibilityResult } from "../deckCompatibility";
 import type { ParsedDeck } from "../deckParser";
 import { evaluateDeckCompatibility } from "../deckCompatibility";
-import { buildLegalAiDeckCatalog, filterByBracket, type AiDeckCandidate } from "../aiDeckCatalog";
+import {
+  buildLegalAiDeckCatalog,
+  catalogRequestKey,
+  filterByBracket,
+  useAiDeckCatalog,
+  useSettledAiCatalog,
+  type AiDeckCandidate,
+  type UseAiDeckCatalogResult,
+} from "../aiDeckCatalog";
 import { buildDeckCatalog } from "../deckCatalog";
 import { getCachedFeed, getDeckFeedOrigin, listSubscriptions } from "../feedService";
 import { estimateDeckBracket, type BracketEstimateOutcome } from "../bracketEstimate";
 import { loadPreconDeckMap } from "../../hooks/useDecks";
-import { FEED_DECK_ORIGINS_KEY, STORAGE_KEY_PREFIX } from "../../constants/storage";
+import { DECKS_CHANGED_EVENT, FEED_DECK_ORIGINS_KEY, STORAGE_KEY_PREFIX } from "../../constants/storage";
 import { BUNDLED_CEDH_DECKS } from "../../data/cedhDecks";
 import { CEDH_BRACKET } from "../cedhLock";
 import type { BracketEstimate } from "../../types/bracket";
@@ -24,9 +33,7 @@ vi.mock("../bracketEstimate", () => ({
 /** Stub the bracket service so `resolveBracket` receives the given estimate. */
 function stubBracketEstimate(estimate: BracketEstimate | null): void {
   vi.mocked(estimateDeckBracket).mockResolvedValue(
-    estimate
-      ? { kind: "estimate", estimate: { ...estimate, data_version: "test-1" } }
-      : { kind: "no-commander" },
+    estimate ? { kind: "estimate", estimate } : { kind: "no-commander" },
   );
 }
 
@@ -116,6 +123,26 @@ describe("buildLegalAiDeckCatalog", () => {
       "saved:Second",
       "saved:Third",
     ]);
+  });
+
+  it("returns the complete raw universe as allCandidates alongside the legal candidates", async () => {
+    saveDeck("Legal Deck", deck("Legal Card"));
+    saveDeck("Illegal Deck", deck("Illegal Starter"));
+
+    const catalog = await buildLegalAiDeckCatalog({
+      selectedFormat: "Standard",
+      selectedMatchType: "Bo1",
+    });
+
+    // Draws, counts, and display use the legal universe only.
+    expect(catalog.candidates.map((candidate) => candidate.id)).toEqual(["saved:Legal Deck"]);
+    // Group toggles clear overrides against the raw universe: the illegal
+    // saved deck and the Commander-only bundled decks are unlisted for
+    // Standard, but an override on one must not survive a folder toggle.
+    const rawIds = catalog.allCandidates.map((candidate) => candidate.id);
+    expect(rawIds).toContain("saved:Legal Deck");
+    expect(rawIds).toContain("saved:Illegal Deck");
+    expect(rawIds).toContain("precon:BundledCedh_HeliodBallista_Demo");
   });
 
   it("includes legal saved Pauper Commander user decks", async () => {
@@ -248,7 +275,6 @@ describe("buildLegalAiDeckCatalog", () => {
 
     const candidate = catalog.candidates.find((c) => c.id === "saved:Tagged Commander");
     expect(candidate?.bracket).toBe(4);
-    expect(candidate?.bracketProvenance).toBe("declared");
   });
 
   it("falls back to the engine bracket estimate for untagged Commander decks", async () => {
@@ -266,8 +292,6 @@ describe("buildLegalAiDeckCatalog", () => {
 
     const candidate = catalog.candidates.find((c) => c.id === "saved:Estimated Commander");
     expect(candidate?.bracket).toBe(4); // "optimized" → 4
-    expect(candidate?.bracketProvenance).toBe("estimated");
-    expect(candidate?.bracketDataVersion).toBe("test-1");
   });
 
   it("leaves an untagged deck null when card data is unavailable", async () => {
@@ -301,11 +325,8 @@ describe("buildLegalAiDeckCatalog", () => {
     });
 
     const candidate = catalog.candidates.find((c) => c.id === "saved:Tagged Over Estimate");
-    // Human-declared bracket 2 wins; the estimate supplies only the current
-    // bracket-list data version used to validate declaration provenance.
+    // Human-declared bracket 2 wins; the cEDH (5) estimate is not consulted.
     expect(candidate?.bracket).toBe(2);
-    expect(candidate?.bracketProvenance).toBe("declared");
-    expect(candidate?.bracketDataVersion).toBe("test-1");
   });
 
   it("validates Commander precons through the engine's compatibility check (banned cards filtered)", async () => {
@@ -434,7 +455,6 @@ describe("bundled cEDH decks", () => {
 
   it("filterByBracket(5) surfaces the bundled cEDH demo deck through the legal AI catalog", async () => {
     vi.mocked(loadPreconDeckMap).mockResolvedValue(null);
-    stubBracketEstimate({ tier: "cedh" } as BracketEstimate);
 
     const catalog = await buildLegalAiDeckCatalog({
       selectedFormat: "Commander",
@@ -446,8 +466,177 @@ describe("bundled cEDH decks", () => {
     expect(demo).toBeDefined();
     expect(demo?.source.type).toBe("precon");
     expect(demo?.bracket).toBe(CEDH_BRACKET);
-    expect(demo?.bracketProvenance).toBe("declared");
-    expect(demo?.bracketDataVersion).toBe("test-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useAiDeckCatalog — library-inventory rescan while mounted
+// ---------------------------------------------------------------------------
+
+describe("useAiDeckCatalog", () => {
+  it("rescans the catalog when the deck inventory changes while mounted", async () => {
+    saveDeck("First", deck("First Card"));
+    const { result, unmount } = renderHook(() =>
+      useAiDeckCatalog({ selectedFormat: "Standard", selectedMatchType: "Bo1" }),
+    );
+    try {
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.candidates.map((candidate) => candidate.id)).toEqual(["saved:First"]);
+
+      // Import a second deck while the setup screen stays mounted: the
+      // inventory event schedules a (debounced) rescan that picks it up, so
+      // mounted previews never hide decks game start can draw.
+      saveDeck("Second", deck("Second Card"));
+      window.dispatchEvent(new Event(DECKS_CHANGED_EVENT));
+      await waitFor(
+        () =>
+          expect(result.current.candidates.map((candidate) => candidate.id)).toEqual([
+            "saved:First",
+            "saved:Second",
+          ]),
+        { timeout: 5000 },
+      );
+      expect(result.current.allCandidates.map((candidate) => candidate.id)).toContain("saved:Second");
+    } finally {
+      unmount();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useSettledAiCatalog — request-keyed retained snapshot
+// ---------------------------------------------------------------------------
+
+function savedSettleCandidate(
+  id: string,
+  bracket: AiDeckCandidate["bracket"],
+  source: AiDeckCandidate["source"] = { type: "saved" },
+): AiDeckCandidate {
+  return {
+    id,
+    name: id,
+    source,
+    deck: { main: [], sideboard: [] },
+    coveragePct: null,
+    archetype: null,
+    bracket,
+  };
+}
+
+function settleHookResult(
+  candidates: AiDeckCandidate[],
+  requestKey: string | null,
+  overrides?: Partial<UseAiDeckCatalogResult>,
+): UseAiDeckCatalogResult {
+  return {
+    candidates,
+    allCandidates: candidates,
+    loading: false,
+    error: null,
+    requestKey,
+    ...overrides,
+  };
+}
+
+describe("useSettledAiCatalog", () => {
+  const keyA = catalogRequestKey("Standard", "Bo1");
+  const keyB = catalogRequestKey("Commander", "Bo1");
+  const deckA = () => savedSettleCandidate("saved:A", 2);
+  const deckB = () => savedSettleCandidate("saved:B", 3);
+
+  function renderSettled(initialKey: string) {
+    return renderHook(
+      ({ catalog, key }: { catalog: UseAiDeckCatalogResult; key: string }) =>
+        useSettledAiCatalog(catalog, key),
+      { initialProps: { catalog: settleHookResult([], null, { loading: true }), key: initialKey } },
+    );
+  }
+
+  it("withholds the previous production after the request changes, even when the new request fails", () => {
+    const { result, rerender, unmount } = renderSettled(keyA);
+    try {
+      expect(result.current).toBeUndefined();
+      // A settles under the Standard request.
+      rerender({ catalog: settleHookResult([deckA()], keyA), key: keyA });
+      expect(result.current?.candidates.map((candidate) => candidate.id)).toEqual(["saved:A"]);
+
+      // Format changes: the hook still returns the old non-loading result
+      // before its scan effect starts loading — it must not surface A as
+      // the Commander legal universe.
+      rerender({ catalog: settleHookResult([deckA()], keyA), key: keyB });
+      expect(result.current).toBeUndefined();
+
+      // The new request runs pending, then rejects: still nothing for
+      // Commander — the error must not preserve A indefinitely either.
+      rerender({ catalog: settleHookResult([deckA()], keyA, { loading: true }), key: keyB });
+      expect(result.current).toBeUndefined();
+      rerender({ catalog: settleHookResult([], keyB, { error: "scan failed" }), key: keyB });
+      expect(result.current).toBeUndefined();
+
+      // The fresh Commander production surfaces once it lands.
+      rerender({ catalog: settleHookResult([deckB()], keyB), key: keyB });
+      expect(result.current?.candidates.map((candidate) => candidate.id)).toEqual(["saved:B"]);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("retains the settled production across a same-request rescan and ignores identity-only refreshes", () => {
+    const { result, rerender, unmount } = renderSettled(keyA);
+    try {
+      rerender({ catalog: settleHookResult([deckA()], keyA), key: keyA });
+      const first = result.current;
+      expect(first?.candidates.map((candidate) => candidate.id)).toEqual(["saved:A"]);
+
+      // A same-request rescan keeps the previous production visible while
+      // loading instead of flashing back to no snapshot.
+      rerender({ catalog: settleHookResult([deckA()], keyA, { loading: true }), key: keyA });
+      expect(result.current).toBe(first);
+
+      // Same content under fresh identities (a caller rebuilding its result
+      // object every render) keeps the snapshot instead of looping.
+      const identical = savedSettleCandidate("saved:A", 2);
+      rerender({ catalog: settleHookResult([identical], keyA), key: keyA });
+      expect(result.current).toBe(first);
+
+      // A genuinely changed refresh is adopted.
+      rerender({ catalog: settleHookResult([deckA(), deckB()], keyA), key: keyA });
+      expect(result.current?.candidates.map((candidate) => candidate.id)).toEqual([
+        "saved:A",
+        "saved:B",
+      ]);
+      expect(result.current).not.toBe(first);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("adopts a provenance-only refresh with unchanged ids and brackets", () => {
+    const { result, rerender, unmount } = renderSettled(keyA);
+    try {
+      // Saved feed mirror A settles feed-owned …
+      rerender({
+        catalog: settleHookResult(
+          [savedSettleCandidate("saved:A", 2, { type: "saved", feedId: "feed-a" })],
+          keyA,
+        ),
+        key: keyA,
+      });
+      const first = result.current;
+      expect(first?.candidates[0].source).toEqual({ type: "saved", feedId: "feed-a" });
+
+      // … then A is adopted without renaming: same id and bracket, but the
+      // origin is gone, which regroups it from its feed into its folder.
+      // The settle bailout must not swallow that semantic update.
+      rerender({
+        catalog: settleHookResult([savedSettleCandidate("saved:A", 2)], keyA),
+        key: keyA,
+      });
+      expect(result.current).not.toBe(first);
+      expect(result.current?.candidates[0].source).toEqual({ type: "saved" });
+    } finally {
+      unmount();
+    }
   });
 });
 
@@ -464,8 +653,6 @@ function makeCandidate(id: string, bracket: AiDeckCandidate["bracket"]): AiDeckC
     coveragePct: null,
     archetype: null,
     bracket,
-    bracketProvenance: bracket === null ? null : "declared",
-    bracketDataVersion: bracket === null ? null : "test-1",
   };
 }
 

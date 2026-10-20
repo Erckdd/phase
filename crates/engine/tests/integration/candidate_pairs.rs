@@ -37,15 +37,12 @@ fn candidate_pairs_returns_at_most_the_two_input_faces() {
         "the fixture must exercise at least one candidate pair"
     );
     for candidate in candidates {
-        let allowed = BTreeSet::from([
-            faces[candidate.left].name.as_str(),
-            faces[candidate.right].name.as_str(),
-        ]);
+        let allowed = BTreeSet::from([candidate.left, candidate.right]);
         assert!(candidate
             .cycle
-            .faces
+            .members
             .iter()
-            .all(|name| allowed.contains(name.as_str())));
+            .all(|member| allowed.contains(&member.source)));
     }
 }
 

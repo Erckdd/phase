@@ -117,10 +117,11 @@
     "coverageThresholdHint": "Excluir mazos por debajo de este umbral de compatibilidad del motor",
     "bracket": "Nivel",
     "bracketHint": "La IA aleatoria elige de estos niveles. Los mazos sin etiqueta se excluyen al filtrar.",
+    "bracketPoolEmpty": "Ningún mazo coincide con los niveles seleccionados. La IA aleatoria elegirá entre todos los mazos legales.",
+    "cedhPoolEmpty": "No hay mazos de nivel 5 disponibles. No se pueden asignar mazos a la IA aleatoria.",
     "opponentLabel": "Oponente {{number}}",
     "deck": "Mazo",
     "difficulty": "Dificultad",
-    "difficultyDefault": "Predeterminado ({{difficulty}})",
     "deckRandom": "Aleatorio",
     "deckRandomCount": "Aleatorio ({{count}})",
     "cedhToggle": {
@@ -133,27 +134,20 @@
       "user": "Usuario",
       "precon": "Precon"
     },
-    "podRelaxation": {
-      "heading": "Ajustes del pod",
-      "bracketDistance": "Asiento {{seat}} — no había ningún mazo del bracket solicitado; se asignó un mazo de Bracket {{tier}}.",
-      "bracketDistanceNoTier": "Asiento {{seat}} — no había ningún mazo del bracket solicitado; se asignó un mazo sin etiqueta.",
-      "labelProvenance": "Asiento {{seat}} — no había ningún mazo con bracket declarado; se asignó un mazo con bracket estimado.",
-      "archetype": "Asiento {{seat}} — no había ningún mazo del arquetipo solicitado.",
-      "distinctColorIdentity": "Asiento {{seat}} — comparte identidad de color con otro asiento.",
-      "distinctCommander": "Asiento {{seat}} — comparte comandante con otro asiento."
-    },
-    "podPreviewCount": "{{n}} mazos coinciden con la configuración actual del pod",
     "brain": "Controlado por",
-    "brainEngine": "IA del motor"
+    "brainEngine": "IA del motor",
+    "poolBracketConflict": "Ninguno de los {{selected}} mazos elegidos es legal con los filtros actuales, así que los rivales aleatorios eligen entre los {{total}} mazos."
   },
-  "gameProvider": {
-    "podSelectionRefused": {
-      "insufficientCandidates": "No hay suficientes mazos distintos: se solicitaron {{requested}} asientos y hay {{available}} disponibles.",
-      "hardGateUnsatisfiable": "No hay suficientes mazos cEDH para una mesa cEDH: se solicitaron {{requested}} asientos y hay {{available}} disponibles.",
-      "tooManySeats": "Una mesa cEDH admite como máximo cuatro jugadores (se solicitaron {{seats}} asientos de IA).",
-      "unknownCommander": "El catálogo de mazos nombra un comandante que los datos de cartas no conocen: {{name}}.",
-      "cardDataUnavailable": "La selección de asientos de IA necesita datos de cartas, que aún no se han cargado."
-    }
+  "randomPool": {
+    "titleHuman": "Tu selección aleatoria",
+    "titleAi": "Selección aleatoria de la IA",
+    "hint": "Desmarca carpetas o mazos para quitarlos de las elecciones aleatorias.",
+    "count": "{{selected}} de {{total}}",
+    "emptyWarning": "Todo está excluido, así que Aleatorio elige entre los {{total}} mazos.",
+    "reset": "Restablecer",
+    "precons": "Precons",
+    "playable": "{{playable}} jugables",
+    "nonePlayable": "Ninguno de los {{selected}} mazos elegidos es legal con los filtros actuales, así que Aleatorio elige entre los {{total}} mazos."
   },
   "feedManager": {
     "title": "Gestionar feeds",
@@ -316,7 +310,8 @@
     "sectionStarred": "Destacados",
     "sectionUnfiled": "Sin clasificar",
     "collapseAll": "Contraer todo",
-    "expandAll": "Expandir todo"
+    "expandAll": "Expandir todo",
+    "poolBracketConflict": "Ninguno de los {{selected}} mazos elegidos es legal con los filtros actuales, así que tu mazo aleatorio se elegirá entre los {{total}} mazos."
   },
   "subscriptions": {
     "emptyTitle": "Sin suscripciones a feeds",
@@ -382,5 +377,9 @@
       "ai": "AI",
       "multiplayer": "Multiplayer"
     }
+  },
+  "pileSource": {
+    "label": "Pila",
+    "default": "Pila predeterminada"
   }
 }

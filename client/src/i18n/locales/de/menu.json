@@ -117,10 +117,11 @@
     "coverageThresholdHint": "Decks unterhalb dieser Engine-Unterstützungsschwelle ausschließen",
     "bracket": "Bracket",
     "bracketHint": "Die zufällige KI wählt aus diesen Brackets. Nicht markierte Decks werden beim Filtern ausgeschlossen.",
+    "bracketPoolEmpty": "Keine Decks entsprechen den gewählten Brackets. Die zufällige KI zieht aus allen legalen Decks.",
+    "cedhPoolEmpty": "Keine Bracket-5-Decks verfügbar. Zufällige KI-Gegner können keine Decks erhalten.",
     "opponentLabel": "Gegner {{number}}",
     "deck": "Deck",
     "difficulty": "Schwierigkeit",
-    "difficultyDefault": "Standard ({{difficulty}})",
     "deckRandom": "Zufällig",
     "deckRandomCount": "Zufällig ({{count}})",
     "cedhToggle": {
@@ -133,27 +134,20 @@
       "user": "Benutzer",
       "precon": "Precon"
     },
-    "podRelaxation": {
-      "heading": "Pod-Anpassungen",
-      "bracketDistance": "Sitz {{seat}} — kein Deck im gewünschten Bracket war verfügbar; ein Deck aus Bracket {{tier}} wurde gesetzt.",
-      "bracketDistanceNoTier": "Sitz {{seat}} — kein Deck im gewünschten Bracket war verfügbar; ein Deck ohne Einstufung wurde gesetzt.",
-      "labelProvenance": "Sitz {{seat}} — kein Deck mit deklarierter Bracket-Einstufung war verfügbar; ein Deck mit geschätztem Bracket wurde gesetzt.",
-      "archetype": "Sitz {{seat}} — kein Deck des gewünschten Archetyps war verfügbar.",
-      "distinctColorIdentity": "Sitz {{seat}} — teilt eine Farbidentität mit einem anderen Sitz.",
-      "distinctCommander": "Sitz {{seat}} — teilt einen Commander mit einem anderen Sitz."
-    },
-    "podPreviewCount": "{{n}} Decks entsprechen den aktuellen Pod-Einstellungen",
     "brain": "Gesteuert von",
-    "brainEngine": "Engine-KI"
+    "brainEngine": "Engine-KI",
+    "poolBracketConflict": "Keines der {{selected}} gewählten Decks ist unter den aktuellen Filtern legal, daher ziehen zufällige KI-Gegner aus allen {{total}} Decks."
   },
-  "gameProvider": {
-    "podSelectionRefused": {
-      "insufficientCandidates": "Nicht genügend unterschiedliche Decks: {{requested}} Sitze angefordert, {{available}} verfügbar.",
-      "hardGateUnsatisfiable": "Nicht genügend cEDH-Decks für einen cEDH-Tisch: {{requested}} Sitze angefordert, {{available}} verfügbar.",
-      "tooManySeats": "An einem cEDH-Tisch können höchstens vier Spieler sitzen ({{seats}} KI-Sitze angefordert).",
-      "unknownCommander": "Der Deckkatalog nennt einen Commander, den die Kartendaten nicht kennen: {{name}}.",
-      "cardDataUnavailable": "Für die Auswahl der KI-Sitze werden Kartendaten benötigt, die noch nicht geladen sind."
-    }
+  "randomPool": {
+    "titleHuman": "Dein Zufallspool",
+    "titleAi": "KI-Zufallspool",
+    "hint": "Deaktiviere Ordner oder Decks, um sie aus Zufallsziehungen zu entfernen.",
+    "count": "{{selected}} von {{total}}",
+    "emptyWarning": "Alles ist ausgeschlossen, daher zieht Zufällig aus allen {{total}} Decks.",
+    "reset": "Zurücksetzen",
+    "precons": "Precons",
+    "playable": "{{playable}} spielbar",
+    "nonePlayable": "Keines der {{selected}} gewählten Decks ist unter den aktuellen Filtern legal, daher zieht Zufällig aus allen {{total}} Decks."
   },
   "feedManager": {
     "title": "Feeds verwalten",
@@ -316,7 +310,8 @@
     "sectionStarred": "Favoriten",
     "sectionUnfiled": "Nicht zugeordnet",
     "collapseAll": "Alle einklappen",
-    "expandAll": "Alle ausklappen"
+    "expandAll": "Alle ausklappen",
+    "poolBracketConflict": "Keines der {{selected}} gewählten Decks ist unter den aktuellen Filtern legal, daher wird dein zufälliges Deck aus allen {{total}} Decks gezogen."
   },
   "subscriptions": {
     "emptyTitle": "Keine Feed-Abonnements",
@@ -382,5 +377,9 @@
       "ai": "AI",
       "multiplayer": "Multiplayer"
     }
+  },
+  "pileSource": {
+    "label": "Stapel",
+    "default": "Standardstapel"
   }
 }

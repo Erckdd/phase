@@ -117,10 +117,11 @@
     "coverageThresholdHint": "Exclure les decks en dessous de ce seuil de prise en charge par le moteur",
     "bracket": "Palier",
     "bracketHint": "L'IA aléatoire choisit parmi ces paliers. Les decks non étiquetés sont exclus lors du filtrage.",
+    "bracketPoolEmpty": "Aucun deck ne correspond aux paliers sélectionnés. L'IA aléatoire choisira parmi tous les decks légaux.",
+    "cedhPoolEmpty": "Aucun deck de palier 5 disponible. Aucun deck ne peut être assigné à l'IA aléatoire.",
     "opponentLabel": "Adversaire {{number}}",
     "deck": "Deck",
     "difficulty": "Difficulté",
-    "difficultyDefault": "Par défaut ({{difficulty}})",
     "deckRandom": "Aléatoire",
     "deckRandomCount": "Aléatoire ({{count}})",
     "cedhToggle": {
@@ -133,27 +134,20 @@
       "user": "Utilisateur",
       "precon": "Precon"
     },
-    "podRelaxation": {
-      "heading": "Ajustements du pod",
-      "bracketDistance": "Place {{seat}} — aucun deck du bracket demandé n'était disponible ; un deck de Bracket {{tier}} a été attribué.",
-      "bracketDistanceNoTier": "Place {{seat}} — aucun deck du bracket demandé n'était disponible ; un deck sans étiquette a été attribué.",
-      "labelProvenance": "Place {{seat}} — aucun deck avec un bracket déclaré n'était disponible ; un deck au bracket estimé a été attribué.",
-      "archetype": "Place {{seat}} — aucun deck de l'archétype demandé n'était disponible.",
-      "distinctColorIdentity": "Place {{seat}} — partage une identité couleur avec une autre place.",
-      "distinctCommander": "Place {{seat}} — partage un commandant avec une autre place."
-    },
-    "podPreviewCount": "{{n}} decks correspondent aux réglages actuels du pod",
     "brain": "Contrôlé par",
-    "brainEngine": "IA du moteur"
+    "brainEngine": "IA du moteur",
+    "poolBracketConflict": "Aucun des {{selected}} decks sélectionnés n'est légal avec les filtres actuels, les adversaires aléatoires utiliseront les {{total}} decks."
   },
-  "gameProvider": {
-    "podSelectionRefused": {
-      "insufficientCandidates": "Pas assez de decks distincts : {{requested}} places demandées, {{available}} disponibles.",
-      "hardGateUnsatisfiable": "Pas assez de decks cEDH pour une table cEDH : {{requested}} places demandées, {{available}} disponibles.",
-      "tooManySeats": "Une table cEDH accueille au maximum quatre joueurs ({{seats}} places IA demandées).",
-      "unknownCommander": "Le catalogue de decks nomme un commandant inconnu des données de cartes : {{name}}.",
-      "cardDataUnavailable": "La sélection des places IA nécessite les données de cartes, qui ne sont pas encore chargées."
-    }
+  "randomPool": {
+    "titleHuman": "Votre pool aléatoire",
+    "titleAi": "Pool aléatoire de l'IA",
+    "hint": "Décochez dossiers ou decks pour les retirer des pioches aléatoires.",
+    "count": "{{selected}} sur {{total}}",
+    "emptyWarning": "Tout est exclu, le tirage aléatoire utilisera les {{total}} decks.",
+    "reset": "Réinitialiser",
+    "precons": "Precons",
+    "playable": "{{playable}} jouables",
+    "nonePlayable": "Aucun des {{selected}} decks sélectionnés n'est légal avec les filtres actuels, le tirage aléatoire utilisera les {{total}} decks."
   },
   "feedManager": {
     "title": "Gérer les flux",
@@ -316,7 +310,8 @@
     "sectionStarred": "Favoris",
     "sectionUnfiled": "Non classé",
     "collapseAll": "Tout réduire",
-    "expandAll": "Tout développer"
+    "expandAll": "Tout développer",
+    "poolBracketConflict": "Aucun des {{selected}} decks sélectionnés n'est légal avec les filtres actuels, ton deck aléatoire sera donc tiré parmi les {{total}} decks."
   },
   "subscriptions": {
     "emptyTitle": "Aucun abonnement à un flux",
@@ -382,5 +377,9 @@
       "ai": "AI",
       "multiplayer": "Multiplayer"
     }
+  },
+  "pileSource": {
+    "label": "Pile",
+    "default": "Pile par défaut"
   }
 }
