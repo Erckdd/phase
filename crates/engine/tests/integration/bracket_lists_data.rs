@@ -38,9 +38,20 @@ fn every_list_has_its_own_dated_source() {
     }
 }
 
+/// The archived copies live in the git-ignored `docs/bracket-sources/`
+/// (WotC's text is not redistributed), so the tracked data names each one and a
+/// checkout that ran `./scripts/fetch-bracket-sources.sh` must hold every one.
 #[test]
 fn every_wotc_source_has_a_readable_local_copy() {
     let root = repository_root();
+    let archive = root.join("docs/bracket-sources");
+    let archived = archive.is_dir();
+    if !archived {
+        eprintln!(
+            "skipping the archive check: {} is missing; run ./scripts/fetch-bracket-sources.sh to validate the local copies",
+            archive.display()
+        );
+    }
     let lists = load_lists();
     for class in BracketCardClass::ALL {
         let source = &lists.get(class).expect("all six classes must exist").source;
@@ -55,7 +66,13 @@ fn every_wotc_source_has_a_readable_local_copy() {
                     .local_copy
                     .as_deref()
                     .expect("WotC sources must have an archived local copy");
-                assert!(root.join(path).exists(), "missing local copy {path}");
+                assert!(
+                    path.starts_with("docs/bracket-sources/"),
+                    "{class:?} local copy {path} must live in the fetched archive"
+                );
+                if archived {
+                    assert!(root.join(path).exists(), "missing local copy {path}");
+                }
             }
         }
     }
