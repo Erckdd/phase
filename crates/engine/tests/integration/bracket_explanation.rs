@@ -256,6 +256,15 @@ fn a_game_changer_commander_is_tagged_and_never_cut() {
             },
         ]
     );
+    // The spec's case is about the step to B2: it carries this same reason, so its cuts
+    // also leave Tergrid out of the removals and ask for a different commander.
+    assert_eq!(
+        e.steps,
+        [BracketLadderStep {
+            lands_on: CommanderBracketTier::Core,
+            reasons: e.why.clone(),
+        }]
+    );
 }
 
 #[test]

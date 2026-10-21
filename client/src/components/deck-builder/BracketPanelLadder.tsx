@@ -7,7 +7,7 @@ import {
   type BracketLadderStep,
 } from "../../types/bracket";
 import { BracketPanelCardList, BracketPanelCardName } from "./BracketPanelCards";
-import { reasonTitle } from "./bracketPanelText";
+import { reasonKey, reasonTitle } from "./bracketPanelText";
 
 interface Props {
   steps: BracketLadderStep[];
@@ -58,6 +58,10 @@ function LadderCut({ cut, onCardClick }: { cut: BracketCut; onCardClick: (name: 
       );
     case "change_combo_answer":
       return <div>{t("bracket.card.ladder.changeComboAnswer")}</div>;
+    default: {
+      const unreachable: never = cut;
+      return unreachable;
+    }
   }
 }
 
@@ -74,8 +78,8 @@ export function BracketPanelLadder({ steps, onCardClick }: Props) {
             {t("bracket.card.tierShort", { tier: BRACKET_TIER_NUMERIC[step.lands_on] })}
           </span>
           <div className="min-w-0 flex-1 space-y-1">
-            {step.reasons.map((reason, reasonIndex) => (
-              <div key={`${reasonTitle(t, reason)}-${reasonIndex}`}>
+            {step.reasons.map((reason) => (
+              <div key={reasonKey(reason)}>
                 <div>{reasonTitle(t, reason)}</div>
                 <div className="space-y-0.5 text-[10px] text-slate-400">
                   {reason.cuts.map((cut, cutIndex) => (

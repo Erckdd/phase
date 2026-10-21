@@ -26,29 +26,38 @@ function ComboPieces({
   );
 }
 
+const SUBLINE_CLASS = "text-[10px] text-slate-400";
+
+/** The collapsed subline, or nothing when the reason has nothing to list. */
 function ReasonSubline({ reason, onCardClick }: Props) {
   const { t } = useTranslation("deck-builder");
   const { source } = reason;
 
   switch (source.kind) {
     case "card_rule":
+      // `cards` is empty for a rule counted only from combo pairs (mass land
+      // denial), so each line renders only when it has something to list.
+      if (source.cards.length === 0 && source.combos.length === 0) return null;
       return (
-        <>
-          <div>
-            <BracketPanelCardList cards={source.cards} joiner="comma" onCardClick={onCardClick} />
-          </div>
+        <div className={SUBLINE_CLASS}>
+          {source.cards.length > 0 && (
+            <div>
+              <BracketPanelCardList cards={source.cards} joiner="comma" onCardClick={onCardClick} />
+            </div>
+          )}
           {source.combos.map((combo) => (
             <div key={`${combo.pieces[0].name}+${combo.pieces[1].name}`}>
               <ComboPieces combo={combo} onCardClick={onCardClick} />{" "}
               {t("bracket.card.reason.comboFromTable")}
             </div>
           ))}
-        </>
+        </div>
       );
     case "combo_floor": {
+      if (source.combos.length === 0) return null;
       const early = source.trigger.kind === "early_two_card";
       return (
-        <>
+        <div className={SUBLINE_CLASS}>
           {source.combos.map((combo) => (
             <div key={`${combo.pieces[0].name}+${combo.pieces[1].name}`}>
               <ComboPieces combo={combo} onCardClick={onCardClick} />
@@ -56,7 +65,7 @@ function ReasonSubline({ reason, onCardClick }: Props) {
               {early && ` · ${t("bracket.card.combo.assembles", { cost: combo.assemble_cost })}`}
             </div>
           ))}
-        </>
+        </div>
       );
     }
     case "owner_combo_answer": {
@@ -68,7 +77,11 @@ function ReasonSubline({ reason, onCardClick }: Props) {
           : declaration.window === "late_game"
             ? "bracket.card.reason.ownerIntendedLate"
             : "bracket.card.reason.ownerIntended";
-      return <div>{t(key)}</div>;
+      return <div className={SUBLINE_CLASS}>{t(key)}</div>;
+    }
+    default: {
+      const unreachable: never = source;
+      return unreachable;
     }
   }
 }
@@ -90,9 +103,7 @@ export function BracketPanelReason({ reason, onCardClick }: Props) {
           {open ? "⌄" : "›"}
         </span>
       </button>
-      <div className="text-[10px] text-slate-400">
-        <ReasonSubline reason={reason} onCardClick={onCardClick} />
-      </div>
+      <ReasonSubline reason={reason} onCardClick={onCardClick} />
       {open && (
         <div className="mt-1 space-y-1 text-[10px] text-slate-400">
           <p>{reasonExplanation(t, reason)}</p>

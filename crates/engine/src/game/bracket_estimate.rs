@@ -2019,6 +2019,58 @@ mod tests {
         }
     }
 
+    /// `bracket_explanation::card_rule_reason` relies on both for every fired row, so a
+    /// row that breaks one fails here instead of panicking the WASM worker.
+    #[test]
+    fn every_floor_rule_has_a_tier_below_and_clears_by_removing_cards() {
+        for rule in FLOOR_RULES {
+            assert!(
+                rule.floor.below().is_some(),
+                "{:?} >= {} raises to {:?}, which has no tier below it",
+                rule.axis,
+                rule.threshold,
+                rule.floor
+            );
+            let firing = cards_until_fired(rule, 0)
+                .unwrap_or_else(|| panic!("{:?} >= {} never fires", rule.axis, rule.threshold));
+            for observed in firing..=u8::MAX {
+                if rule
+                    .comparator
+                    .evaluate(i32::from(observed), i32::from(rule.threshold))
+                {
+                    assert!(
+                        cards_until_cleared(rule.comparator, rule.threshold, observed).is_some(),
+                        "{:?} {:?} {} fired at {observed} but removals cannot clear it",
+                        rule.axis,
+                        rule.comparator,
+                        rule.threshold
+                    );
+                }
+            }
+        }
+    }
+
+    /// The panel keys a reason by floor and axis (or trigger kind), which is unique
+    /// only while no two rows share them.
+    #[test]
+    fn floor_rows_are_unique_per_axis_or_trigger_at_each_floor() {
+        let card_rows: BTreeSet<(BracketAxis, u8)> = FLOOR_RULES
+            .iter()
+            .map(|rule| (rule.axis, rule.floor.as_u8()))
+            .collect();
+        assert_eq!(card_rows.len(), FLOOR_RULES.len());
+        let combo_rows: Vec<(std::mem::Discriminant<ComboFloorTrigger>, u8)> = COMBO_FLOOR_RULES
+            .iter()
+            .map(|rule| (std::mem::discriminant(&rule.trigger), rule.floor.as_u8()))
+            .collect();
+        for (index, row) in combo_rows.iter().enumerate() {
+            assert!(
+                !combo_rows[..index].contains(row),
+                "duplicate combo floor row {index}"
+            );
+        }
+    }
+
     #[test]
     fn floor_is_max_over_fired_rules() {
         let db = db_with_signals(&[
@@ -2068,7 +2120,7 @@ mod tests {
     }
 
     #[test]
-    fn cards_until_cleared_mirrors_cards_until_fired() {
+    fn cards_until_cleared_is_the_fewest_removals_or_none_when_removals_cannot_clear() {
         assert_eq!(cards_until_cleared(Comparator::GE, 4, 5), Some(2));
         assert_eq!(cards_until_cleared(Comparator::GE, 1, 3), Some(3));
         assert_eq!(cards_until_cleared(Comparator::GT, 2, 5), Some(3));

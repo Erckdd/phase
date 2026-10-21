@@ -407,6 +407,14 @@ const COMBO_OMISSIONS: readonly ComboOmission[] = [
   "result_text",
   "unmodeled_result_classes",
 ];
+const BRACKET_COMPARATORS: readonly BracketCheck["comparator"][] = [
+  "GT",
+  "LT",
+  "GE",
+  "LE",
+  "EQ",
+  "NE",
+];
 
 function isBracketAxis(value: unknown): value is BracketAxis {
   return typeof value === "string" && BRACKET_AXES.includes(value as BracketAxis);
@@ -528,7 +536,7 @@ function isBracketCheck(value: unknown): value is BracketCheck {
     typeof value.axis === "string" &&
     BRACKET_AXES.includes(value.axis as BracketAxis) &&
     typeof value.comparator === "string" &&
-    ["GT", "LT", "GE", "LE", "EQ", "NE"].includes(value.comparator) &&
+    BRACKET_COMPARATORS.includes(value.comparator as BracketCheck["comparator"]) &&
     typeof value.observed === "number" &&
     typeof value.threshold === "number" &&
     isTier(value.floor) &&
@@ -566,14 +574,6 @@ function isDeclarationVerdict(value: unknown): value is DeclarationVerdict {
 }
 
 const BRACKET_CARD_ROLES: readonly BracketCardRole[] = ["commander", "deck"];
-const BRACKET_COMPARATORS: readonly BracketCheck["comparator"][] = [
-  "GT",
-  "LT",
-  "GE",
-  "LE",
-  "EQ",
-  "NE",
-];
 
 function isBracketCard(value: unknown): value is BracketCard {
   return (

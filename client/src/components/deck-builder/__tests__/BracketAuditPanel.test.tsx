@@ -178,6 +178,39 @@ describe("BracketAuditPanel", () => {
     expect(document.activeElement).toBe(tab("Why B4"));
   });
 
+  it("keeps an expanded Why reason open on that reason when the one above it goes", () => {
+    const landDenialReason: BracketReason = {
+      floor: "optimized",
+      source: {
+        kind: "card_rule",
+        axis: "mass_land_denial",
+        comparator: "GE",
+        threshold: 1,
+        observed: 1,
+        tier_below: "upgraded",
+        allowed_below: 0,
+        cards: [deck("Armageddon")],
+        combos: [],
+      },
+      official_line: "you should not expect to see these cards anywhere in Brackets 1-3",
+      ...OFFICIAL,
+      cuts: [{ kind: "remove_cards", count: 1, from: [deck("Armageddon")] }],
+    };
+    const withBoth = makeEstimate({
+      explanation: {
+        why: [landDenialReason, comboReason],
+        steps: [{ lands_on: "upgraded", reasons: [landDenialReason, comboReason] }],
+      },
+    });
+    const view = renderPanel(withBoth);
+    const comboHeader = () => screen.getByRole("button", { name: /Early two-card combo/ });
+    fireEvent.click(comboHeader());
+    expect(comboHeader()).toHaveAttribute("aria-expanded", "true");
+
+    view.update(makeEstimate());
+    expect(comboHeader()).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("keeps the selected tab when the deck changes and shows only the footnote at B2", () => {
     const view = renderPanel(makeEstimate());
     fireEvent.click(tab("Bring it down"));
@@ -321,8 +354,11 @@ describe("BracketAuditPanel", () => {
       }),
     );
     const button = screen.getByRole("button", { name: /card name wasn't found/ });
-    fireEvent.click(button);
     const list = document.getElementById(button.getAttribute("aria-controls") ?? "");
+    expect(list).not.toBeNull();
+    expect(list).toHaveAttribute("hidden");
+    fireEvent.click(button);
+    expect(list).not.toHaveAttribute("hidden");
     expect(list).toContainElement(screen.getByText("Missing A"));
   });
 

@@ -11,6 +11,7 @@ import {
 import { BracketPanelLadder } from "./BracketPanelLadder";
 import { BracketPanelReason } from "./BracketPanelReason";
 import { BracketPanelTrack } from "./BracketPanelTrack";
+import { reasonKey } from "./bracketPanelText";
 
 interface Props {
   estimate: BracketEstimate | null;
@@ -120,13 +121,11 @@ export function BracketAuditPanel({ estimate, manualBracket, onCardClick, emptyR
           >
             {t("bracket.card.partialCoverage", { count: unresolved.length })}
           </button>
-          {missingOpen && (
-            <ul id={missingListId} className="list-disc pl-5 text-amber-100">
-              {unresolved.map((name) => (
-                <li key={name}>{name}</li>
-              ))}
-            </ul>
-          )}
+          {/* Always in the page so `aria-controls` names a real element; like the
+              tab panels, it is hidden and empty while collapsed. */}
+          <ul id={missingListId} hidden={!missingOpen} className="list-disc pl-5 text-amber-100">
+            {missingOpen && unresolved.map((name) => <li key={name}>{name}</li>)}
+          </ul>
         </div>
       )}
 
@@ -182,9 +181,9 @@ export function BracketAuditPanel({ estimate, manualBracket, onCardClick, emptyR
             {steps.length === 0 && why.length > 0 && (
               <p className="mt-1 text-slate-400">{t("bracket.card.why.rulesOutB1")}</p>
             )}
-            {why.map((reason, index) => (
+            {why.map((reason) => (
               <BracketPanelReason
-                key={`${reason.floor}-${reason.source.kind}-${index}`}
+                key={reasonKey(reason)}
                 reason={reason}
                 onCardClick={onCardClick}
               />

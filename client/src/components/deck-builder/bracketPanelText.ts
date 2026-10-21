@@ -45,6 +45,10 @@ export function reasonTitle(t: TFunction, reason: BracketReason): string {
         : t("bracket.card.reason.comboStandalone");
     case "owner_combo_answer":
       return t("bracket.card.reason.ownerAnswer");
+    default: {
+      const unreachable: never = source;
+      return unreachable;
+    }
   }
 }
 
@@ -68,6 +72,10 @@ export function reasonExplanation(t: TFunction, reason: BracketReason): string {
         : t("bracket.card.explain.comboStandalone");
     case "owner_combo_answer":
       return t("bracket.card.explain.ownerAnswer");
+    default: {
+      const unreachable: never = source;
+      return unreachable;
+    }
   }
 }
 
@@ -79,6 +87,10 @@ function comboOutcomeText(t: TFunction, outcome: ComboOutcome): string {
       return t("bracket.combo.outcome.unbounded", {
         resource: t(COMBO_RESOURCE_I18N_KEY[outcome.resource]),
       });
+    default: {
+      const unreachable: never = outcome;
+      return unreachable;
+    }
   }
 }
 
@@ -86,4 +98,27 @@ export function comboOutcomesText(t: TFunction, outcomes: ComboOutcome[]): strin
   return outcomes
     .map((outcome) => comboOutcomeText(t, outcome))
     .join(t("bracket.card.listComma"));
+}
+
+/**
+ * A reason's React key, stable across deck edits so an expanded row stays on its
+ * own reason: floor, source kind, then the axis, trigger kind or "owner". No index
+ * suffix is needed. Within one list the engine emits at most one card rule per axis
+ * and floor (`FLOOR_RULES` has one row per pair), one combo floor per trigger kind
+ * and floor, and one owner answer.
+ */
+export function reasonKey(reason: BracketReason): string {
+  const { floor, source } = reason;
+  switch (source.kind) {
+    case "card_rule":
+      return `${floor}-${source.kind}-${source.axis}`;
+    case "combo_floor":
+      return `${floor}-${source.kind}-${source.trigger.kind}`;
+    case "owner_combo_answer":
+      return `${floor}-${source.kind}-owner`;
+    default: {
+      const unreachable: never = source;
+      return unreachable;
+    }
+  }
 }

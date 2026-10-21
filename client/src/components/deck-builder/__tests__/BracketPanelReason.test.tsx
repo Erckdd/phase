@@ -25,6 +25,11 @@ function reasonOf(source: BracketReasonSource): BracketReason {
   return { ...BASE, floor: "upgraded", source };
 }
 
+/** Wrappers that render with nothing to show. */
+function textlessDivs(container: HTMLElement): HTMLDivElement[] {
+  return Array.from(container.querySelectorAll("div")).filter((div) => div.textContent === "");
+}
+
 describe("BracketPanelReason", () => {
   it("shows the title and card names collapsed, details after a tap", () => {
     const reason = reasonOf({
@@ -108,6 +113,38 @@ describe("BracketPanelReason", () => {
     });
     render(<BracketPanelReason reason={reason} onCardClick={vi.fn()} />);
     expect(screen.getByText(/· Wins the game, Unbounded mana$/)).toBeInTheDocument();
+  });
+
+  it("leaves out the card line for a rule counted only from combo pairs", () => {
+    const reason = reasonOf({
+      kind: "card_rule",
+      axis: "mass_land_denial",
+      comparator: "GE",
+      threshold: 1,
+      observed: 1,
+      tier_below: "upgraded",
+      allowed_below: 0,
+      cards: [],
+      combos: [
+        {
+          pieces: [deck("Land Piece A"), deck("Land Piece B")],
+          outcomes: [{ kind: "wins" }],
+          assemble_cost: 5,
+        },
+      ],
+    });
+    const { container } = render(<BracketPanelReason reason={reason} onCardClick={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Land Piece A" })).toBeInTheDocument();
+    expect(textlessDivs(container)).toHaveLength(0);
+  });
+
+  it("renders no subline for an owner answer that is not a claimed combo", () => {
+    const reason = reasonOf({
+      kind: "owner_combo_answer",
+      declaration: { kind: "none_intended" },
+    });
+    const { container } = render(<BracketPanelReason reason={reason} onCardClick={vi.fn()} />);
+    expect(textlessDivs(container)).toHaveLength(0);
   });
 
   it("words the owner's answer as the owner's", () => {

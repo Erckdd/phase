@@ -236,6 +236,12 @@ pub(crate) fn explain(
     let ladder_reasons = sources.iter().filter_map(|source| {
         let combos = source.combos(estimate);
         let listed = match source {
+            // A combo floor at this tier or below leaves out the pairs a card rule shows,
+            // so "cuts are sufficient per step" holds only while that rule's cuts break
+            // every pair it lists. Today they do: the one rule that counts pairs, mass
+            // land denial at >= 1, clears only at zero, so its cuts take its whole count,
+            // every pair included. A pair-counted rule that could clear with pairs left
+            // would strand them; the `debug_assert!` below catches that.
             FiredSource::CardRule(_) | FiredSource::OwnerComboAnswer(_) => {
                 shown.extend(combos.iter().map(|combo| combo_identity(combo)));
                 combos
@@ -251,7 +257,12 @@ pub(crate) fn explain(
                 unshown
             }
         };
-        Some(source.reason(&listed, card_readings, roles))
+        let reason = source.reason(&listed, card_readings, roles);
+        debug_assert!(
+            breaks_every_listed_pair(&reason),
+            "a ladder reason's pairs are marked shown, so its own cuts must break them: {reason:?}"
+        );
+        Some(reason)
     });
     let steps = ladder(estimate.tier, group_by_tier(ladder_reasons));
 
@@ -303,6 +314,18 @@ impl<'a> FiredSource<'a> {
     }
 }
 
+/// Whether `reason`'s cuts include the cut that breaks each pair it lists.
+fn breaks_every_listed_pair(reason: &BracketReason) -> bool {
+    let listed: &[ExplainedCombo] = match &reason.source {
+        BracketReasonSource::CardRule { combos, .. }
+        | BracketReasonSource::ComboFloor { combos, .. } => combos,
+        BracketReasonSource::OwnerComboAnswer { .. } => &[],
+    };
+    listed
+        .iter()
+        .all(|combo| reason.cuts.contains(&combo_cut(combo.clone())))
+}
+
 /// A combo's identity: its two piece keys, sorted, so either order names the same pair.
 fn combo_identity(combo: &ComboMatch) -> [&str; 2] {
     let mut keys = combo.pieces.each_ref().map(|piece| piece.key.as_str());
@@ -318,6 +341,8 @@ fn card_rule_reason(
     combos: &[&ComboMatch],
     roles: &CardRoles<'_>,
 ) -> BracketReason {
+    // Both invariants hold for every `FLOOR_RULES` row; the bracket_estimate test
+    // `every_floor_rule_has_a_tier_below_and_clears_by_removing_cards` pins them.
     let need = cards_until_cleared(check.comparator, check.threshold, check.observed)
         .expect("every fired floor rule clears by removing cards");
     let tier_below = check
