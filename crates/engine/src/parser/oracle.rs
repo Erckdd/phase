@@ -5675,8 +5675,10 @@ fn parse_normalized_oracle_ir(
             //    branches) — every one of them a CR 608.2 resolution-tree field.
             //    The shell stamps NONE of them: it writes cost, cost_reduction,
             //    activation restrictions and the other CR 602.1 envelope fields
-            //    only. So the pre-shell and post-shell lowerings still agree on
-            //    this predicate.
+            //    only. Once that envelope is complete, the linked-paid-cast
+            //    mana-composition fence can additionally refuse unsupported
+            //    inline work; the pre-shell trial has no activation cost and
+            //    deliberately does not classify that composition yet.
             //
             // Cost: one extra lowering per LEVEL-block activated line (two or
             // three rather than one or two). It is intrinsic, not laziness — the

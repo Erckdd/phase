@@ -16104,6 +16104,11 @@ pub struct AdditionalCostInstance {
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub origin_ordinal: u32,
     pub cost: AdditionalCost,
+    /// CR 611.3b: the permanent whose static ability grants this instance
+    /// (Silverquill, the Disputant). `None` for a printed instance and for a
+    /// grant no permanent generates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_source: Option<ObjectId>,
 }
 
 impl AdditionalCostInstance {
@@ -16112,7 +16117,13 @@ impl AdditionalCostInstance {
             origin,
             origin_ordinal: 0,
             cost,
+            grant_source: None,
         }
+    }
+
+    pub fn with_grant_source(mut self, grant_source: Option<ObjectId>) -> Self {
+        self.grant_source = grant_source;
+        self
     }
 
     pub fn new_with_ordinal(
@@ -16124,6 +16135,7 @@ impl AdditionalCostInstance {
             origin,
             origin_ordinal,
             cost,
+            grant_source: None,
         }
     }
 }
@@ -16139,6 +16151,10 @@ pub struct AdditionalCostInstancePayment {
     pub origin_ordinal: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub count: u32,
+    /// CR 702.153b: the `grant_source` of the instance this payment was made
+    /// for, so a trigger reads the payment of its own instance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_source: Option<ObjectId>,
 }
 
 impl AdditionalCostInstancePayment {
@@ -16147,6 +16163,7 @@ impl AdditionalCostInstancePayment {
             origin,
             origin_ordinal: 0,
             count,
+            grant_source: None,
         }
     }
 
@@ -16155,6 +16172,7 @@ impl AdditionalCostInstancePayment {
             origin,
             origin_ordinal,
             count,
+            grant_source: None,
         }
     }
 }
@@ -31693,18 +31711,35 @@ impl SpellContext {
         origin_ordinal: u32,
         count: u32,
     ) {
-        if count == 0 {
+        self.record_instance_payment(AdditionalCostInstancePayment::new_with_ordinal(
+            origin,
+            origin_ordinal,
+            count,
+        ));
+    }
+
+    /// CR 702.153b: record a payment for one queued instance, keeping the
+    /// instance's `grant_source` on the payment.
+    pub fn record_payment_for_instance(&mut self, instance: &AdditionalCostInstance, count: u32) {
+        self.record_instance_payment(AdditionalCostInstancePayment {
+            grant_source: instance.grant_source,
+            ..AdditionalCostInstancePayment::new_with_ordinal(
+                instance.origin,
+                instance.origin_ordinal,
+                count,
+            )
+        });
+    }
+
+    fn record_instance_payment(&mut self, payment: AdditionalCostInstancePayment) {
+        if payment.count == 0 {
             return;
         }
-        self.additional_cost_payments
-            .push(AdditionalCostInstancePayment::new_with_ordinal(
-                origin,
-                origin_ordinal,
-                count,
-            ));
+        self.additional_cost_payment_count = self
+            .additional_cost_payment_count
+            .saturating_add(payment.count);
+        self.additional_cost_payments.push(payment);
         self.additional_cost_paid = true;
-        self.additional_cost_payment_count =
-            self.additional_cost_payment_count.saturating_add(count);
     }
 
     pub fn instance_payment_count(&self, origin: AdditionalCostOrigin) -> u32 {
