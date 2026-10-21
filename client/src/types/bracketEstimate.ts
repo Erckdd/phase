@@ -192,6 +192,62 @@ export type DeclarationVerdict =
       raised_by_combo_floor?: ComboFloorTrigger | null;
     };
 
+export type BracketCardRole = "commander" | "deck";
+
+/** A card the explanation names, tagged with where it sits in the deck. */
+export interface BracketCard {
+  name: string;
+  role: BracketCardRole;
+}
+
+export interface ExplainedCombo {
+  pieces: [BracketCard, BracketCard];
+  outcomes: ComboOutcome[];
+  assemble_cost: number;
+}
+
+export type BracketReasonSource =
+  | {
+      kind: "card_rule";
+      axis: BracketAxis;
+      comparator: BracketCheck["comparator"];
+      threshold: number;
+      observed: number;
+      tier_below: CommanderBracketTier;
+      allowed_below: number;
+      cards: BracketCard[];
+      combos: ExplainedCombo[];
+    }
+  | { kind: "combo_floor"; trigger: ComboFloorTrigger; combos: ExplainedCombo[] }
+  | { kind: "owner_combo_answer"; declaration: ComboDeclaration };
+
+export type BracketCut =
+  | { kind: "remove_cards"; count: number; from: BracketCard[] }
+  | { kind: "break_combo"; combo: ExplainedCombo; remove_one_of: BracketCard[] }
+  | { kind: "replace_commander"; count: number; of: BracketCard[] }
+  | { kind: "change_combo_answer" };
+
+export interface BracketReason {
+  floor: CommanderBracketTier;
+  source: BracketReasonSource;
+  official_line: string;
+  source_document: string;
+  source_published: string;
+  source_url: string;
+  cuts: BracketCut[];
+}
+
+export interface BracketLadderStep {
+  lands_on: CommanderBracketTier;
+  reasons: BracketReason[];
+}
+
+/** Engine-computed account of the estimate; the panel renders it verbatim. */
+export interface BracketExplanation {
+  why: BracketReason[];
+  steps: BracketLadderStep[];
+}
+
 export interface BracketEstimate {
   tier: CommanderBracketTier;
   axes: BracketAxisReadings;
@@ -211,6 +267,7 @@ export interface BracketEstimate {
   combo_coverage?: ComboCoverage;
   /** Absent on payloads older than 61-08; the engine serde-defaults them. */
   combo_provenance?: ComboProvenance | null;
+  explanation: BracketExplanation;
 }
 
 // Mirrors the sections `estimate_bracket` counts, plus `sideboard`, which the
@@ -515,6 +572,126 @@ function isDeclarationVerdict(value: unknown): value is DeclarationVerdict {
   );
 }
 
+const BRACKET_CARD_ROLES: readonly BracketCardRole[] = ["commander", "deck"];
+const BRACKET_COMPARATORS: readonly BracketCheck["comparator"][] = [
+  "GT",
+  "LT",
+  "GE",
+  "LE",
+  "EQ",
+  "NE",
+];
+
+function isBracketCard(value: unknown): value is BracketCard {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    typeof value.role === "string" &&
+    BRACKET_CARD_ROLES.includes(value.role as BracketCardRole)
+  );
+}
+
+function isExplainedCombo(value: unknown): value is ExplainedCombo {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.pieces) &&
+    value.pieces.length === 2 &&
+    value.pieces.every(isBracketCard) &&
+    Array.isArray(value.outcomes) &&
+    value.outcomes.every(isComboOutcome) &&
+    typeof value.assemble_cost === "number"
+  );
+}
+
+function isReasonSource(value: unknown): value is BracketReasonSource {
+  if (!isRecord(value)) return false;
+  switch (value.kind) {
+    case "card_rule":
+      return (
+        isBracketAxis(value.axis) &&
+        typeof value.comparator === "string" &&
+        BRACKET_COMPARATORS.includes(value.comparator as BracketCheck["comparator"]) &&
+        typeof value.threshold === "number" &&
+        typeof value.observed === "number" &&
+        isTier(value.tier_below) &&
+        typeof value.allowed_below === "number" &&
+        Array.isArray(value.cards) &&
+        value.cards.every(isBracketCard) &&
+        Array.isArray(value.combos) &&
+        value.combos.every(isExplainedCombo)
+      );
+    case "combo_floor":
+      return (
+        isComboFloorTrigger(value.trigger) &&
+        Array.isArray(value.combos) &&
+        value.combos.every(isExplainedCombo)
+      );
+    case "owner_combo_answer":
+      return isComboDeclaration(value.declaration);
+    default:
+      return false;
+  }
+}
+
+function isBracketCut(value: unknown): value is BracketCut {
+  if (!isRecord(value)) return false;
+  switch (value.kind) {
+    case "remove_cards":
+      return (
+        typeof value.count === "number" &&
+        Array.isArray(value.from) &&
+        value.from.every(isBracketCard)
+      );
+    case "break_combo":
+      return (
+        isExplainedCombo(value.combo) &&
+        Array.isArray(value.remove_one_of) &&
+        value.remove_one_of.every(isBracketCard)
+      );
+    case "replace_commander":
+      return (
+        typeof value.count === "number" && Array.isArray(value.of) && value.of.every(isBracketCard)
+      );
+    case "change_combo_answer":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isBracketReason(value: unknown): value is BracketReason {
+  return (
+    isRecord(value) &&
+    isTier(value.floor) &&
+    isReasonSource(value.source) &&
+    typeof value.official_line === "string" &&
+    typeof value.source_document === "string" &&
+    typeof value.source_published === "string" &&
+    typeof value.source_url === "string" &&
+    Array.isArray(value.cuts) &&
+    value.cuts.every(isBracketCut)
+  );
+}
+
+function isLadderStep(value: unknown): value is BracketLadderStep {
+  return (
+    isRecord(value) &&
+    isTier(value.lands_on) &&
+    Array.isArray(value.reasons) &&
+    value.reasons.every(isBracketReason)
+  );
+}
+
+function isBracketExplanation(value: unknown): value is BracketExplanation {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.why) &&
+    value.why.every(isBracketReason) &&
+    Array.isArray(value.steps) &&
+    value.steps.every(isLadderStep)
+  );
+}
+
 export function isBracketEstimate(value: unknown): value is BracketEstimate {
   if (!isRecord(value) || !isTier(value.tier)) return false;
   if (typeof value.data_version !== "string") return false;
@@ -539,6 +716,7 @@ export function isBracketEstimate(value: unknown): value is BracketEstimate {
       value.combo_coverage === "measured") &&
     (value.combo_provenance === undefined ||
       value.combo_provenance === null ||
-      isComboProvenance(value.combo_provenance))
+      isComboProvenance(value.combo_provenance)) &&
+    isBracketExplanation(value.explanation)
   );
 }

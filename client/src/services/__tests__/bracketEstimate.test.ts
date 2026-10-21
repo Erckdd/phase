@@ -20,6 +20,7 @@ const estimate: BracketEstimate = {
   declaration: null,
   combo_barometer: { declaration: { kind: "undeclared" }, floor: null },
   barometers: {},
+  explanation: { why: [], steps: [] },
 };
 
 const request: BracketEstimateRequest = {

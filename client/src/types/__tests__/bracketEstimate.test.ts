@@ -36,10 +36,77 @@ function estimate() {
       mass_land_denial: "engine",
       two_card_combos: "unanswered",
     },
+    explanation: { why: [], steps: [] },
   };
 }
 
+const card = (name: string, role = "deck") => ({ name, role });
+const explainedCombo = () => ({
+  pieces: [card("Heliod, Sun-Crowned"), card("Walking Ballista", "commander")],
+  outcomes: [{ kind: "wins" }, { kind: "unbounded", resource: "damage" }],
+  assemble_cost: 6,
+});
+const reason = (source: unknown, cuts: unknown[]) => ({
+  floor: "upgraded",
+  source,
+  official_line: "line",
+  source_document: "doc",
+  source_published: "2026-02-09",
+  source_url: "https://example.test",
+  cuts,
+});
+
 describe("isBracketEstimate", () => {
+  it("accepts an explanation with every reason and cut kind", () => {
+    const sources = [
+      {
+        kind: "card_rule",
+        axis: "game_changers",
+        comparator: "GE",
+        threshold: 1,
+        observed: 2,
+        tier_below: "core",
+        allowed_below: 0,
+        cards: [card("Smothering Tithe")],
+        combos: [explainedCombo()],
+      },
+      { kind: "combo_floor", trigger: { kind: "standalone_two_card" }, combos: [explainedCombo()] },
+      { kind: "owner_combo_answer", declaration: { kind: "intended", window: "early_game" } },
+    ];
+    const cuts = [
+      { kind: "remove_cards", count: 1, from: [card("Smothering Tithe")] },
+      { kind: "break_combo", combo: explainedCombo(), remove_one_of: [card("Walking Ballista", "commander")] },
+      { kind: "replace_commander", count: 1, of: [card("Kenrith", "commander")] },
+      { kind: "change_combo_answer" },
+    ];
+    const why = sources.map((source) => reason(source, cuts));
+    expect(
+      isBracketEstimate({
+        ...estimate(),
+        explanation: { why, steps: [{ lands_on: "core", reasons: why }] },
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects an explanation with an unknown cut kind", () => {
+    const why = [reason({ kind: "owner_combo_answer", declaration: { kind: "undeclared" } }, [{ kind: "remove_some" }])];
+    expect(isBracketEstimate({ ...estimate(), explanation: { why, steps: [] } })).toBe(false);
+  });
+
+  it("rejects a card with an unknown role", () => {
+    const why = [
+      reason({ kind: "combo_floor", trigger: { kind: "standalone_two_card" }, combos: [] }, [
+        { kind: "remove_cards", count: 1, from: [card("Sol Ring", "sideboard")] },
+      ]),
+    ];
+    expect(isBracketEstimate({ ...estimate(), explanation: { why, steps: [] } })).toBe(false);
+  });
+
+  it("rejects an estimate without an explanation", () => {
+    const { explanation: _explanation, ...rest } = estimate();
+    expect(isBracketEstimate(rest)).toBe(false);
+  });
+
   it("accepts an estimate without the 61-08 combo fields", () => {
     expect(isBracketEstimate(estimate())).toBe(true);
   });

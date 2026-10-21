@@ -26,6 +26,7 @@ const mockEstimate: BracketEstimate = {
   declaration: null,
   combo_barometer: { declaration: { kind: "undeclared" }, floor: null },
   barometers: {},
+  explanation: { why: [], steps: [] },
 };
 
 const deck: ParsedDeck = {

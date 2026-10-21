@@ -94,6 +94,7 @@ const estimate: BracketEstimate = {
     mass_land_denial: "engine",
     two_card_combos: "unanswered",
   },
+  explanation: { why: [], steps: [] },
 };
 
 describe("BracketAuditPanel", () => {
