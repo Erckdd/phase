@@ -13,8 +13,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
+
+/// The tracked `data/bracket_lists.json`, compiled in for [`BracketLists::bundled_revision`].
+const BUNDLED_LISTS_JSON: &str = include_str!("../../../../data/bracket_lists.json");
 
 /// **Frozen wire DTO.** Per-card bracket signal flags stamped onto every
 /// `CardExportEntry`. Its field names, order, defaults, and derives preserve
@@ -192,6 +196,29 @@ impl BracketLists {
             version: parsed.version,
             lists,
         })
+    }
+
+    /// The compiled-in revision of `data/bracket_lists.json`, holding no lists.
+    ///
+    /// A database loaded from a card export takes every curated signal from the
+    /// export's per-card stamps, which `oracle-gen` writes from this same file,
+    /// so it carries only this version as the estimate's `data_version`. The two
+    /// agree when the engine and the export come from one commit, as deploy and
+    /// release builds do. A build that pairs a checkout's engine with a card pool
+    /// generated elsewhere (`build-selfhost-web.sh` falling back to upstream's
+    /// pool, or a local export not regenerated after a list change) can label
+    /// signals stamped from a different revision.
+    pub(crate) fn bundled_revision() -> Self {
+        static VERSION: OnceLock<String> = OnceLock::new();
+        let version = VERSION.get_or_init(|| {
+            Self::from_json_str(BUNDLED_LISTS_JSON)
+                .unwrap_or_else(|error| panic!("compiled-in bracket lists are invalid: {error}"))
+                .version
+        });
+        Self {
+            version: version.clone(),
+            lists: BTreeMap::new(),
+        }
     }
 
     /// Test/builder constructor that avoids hand-writing schema JSON.
@@ -438,6 +465,17 @@ mod tests {
     fn malformed_source_date_is_an_error() {
         let malformed = SAMPLE.replace("2026-02-09", "2026-2-9");
         assert!(BracketLists::from_json_str(&malformed).is_err());
+    }
+
+    #[test]
+    fn bundled_revision_is_the_tracked_file_version_with_no_lists() {
+        let tracked = BracketLists::from_json_path(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/bracket_lists.json"),
+        )
+        .expect("tracked bracket list data must parse");
+        let bundled = BracketLists::bundled_revision();
+        assert_eq!(bundled.version, tracked.version);
+        assert_eq!(bundled.all_names().count(), 0);
     }
 
     #[test]

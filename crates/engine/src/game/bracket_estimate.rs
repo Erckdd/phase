@@ -529,7 +529,9 @@ pub struct BracketEstimate {
     /// One row per `FLOOR_RULES` entry, fired or not, in table order.
     pub checks: Vec<BracketCheck>,
     pub coverage: BracketCoverage,
-    /// `BracketLists.version`, passed through from the export pipeline.
+    /// The database's `BracketLists.version`. For an export-loaded database
+    /// this is the engine's compiled-in list revision
+    /// (`BracketLists::bundled_revision`).
     pub data_version: String,
     /// `None` when the request carried no declaration. Nested `Option` is
     /// avoided by keeping presence-of-a-declaration in the `Option` and the

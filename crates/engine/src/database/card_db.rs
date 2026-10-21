@@ -88,9 +88,10 @@ pub struct CardDatabase {
     /// cards carry rulings; back-face lookups return the empty slice.
     pub(crate) rulings_index: HashMap<String, Vec<Ruling>>,
     pub(crate) errors: Vec<(PathBuf, String)>,
-    /// Non-MTGJSON bracket-axis name lists. Populated by `with_bracket_lists`
-    /// at export time for policy axes MTGJSON does not expose. WASM/server
-    /// consumers receive those signals in the already-built database.
+    /// Non-MTGJSON bracket-axis name lists, attached by `with_bracket_lists`.
+    /// A database loaded from an export holds only the engine's compiled-in
+    /// list revision (`BracketLists::bundled_revision`) and reads its signals
+    /// from each entry's stamps; that function says when the two can differ.
     pub(crate) bracket_lists: BracketLists,
     /// Stamped during `from_export_entries` from each `CardExportEntry`'s
     /// `bracket_signals` field. Keyed by lowercased card name. Read by
@@ -197,7 +198,7 @@ impl CardDatabase {
             printings_index,
             rulings_index,
             errors: Vec::new(),
-            bracket_lists: BracketLists::default(),
+            bracket_lists: BracketLists::bundled_revision(),
             bracket_signals_by_name,
             creature_type_vocabulary,
         }
@@ -495,8 +496,10 @@ impl CardDatabase {
     }
 
     /// Case-insensitive bracket-signal lookup. Exported and curated-list axes
-    /// are unioned, so a stale export cannot suppress a newly curated Game
-    /// Changer. Other axes likewise retain signals from either source.
+    /// are unioned, so when lists are attached with `with_bracket_lists`, a
+    /// stale export cannot suppress a newly curated Game Changer. Other axes
+    /// likewise retain signals from either source. An export-loaded database
+    /// attaches no lists and reads the export's stamps alone.
     /// Returns all-false `BracketSignals` when the name is unknown to both.
     ///
     /// Multi-face combined names (`"A // B"` — partner pairs, MDFCs, split,
@@ -1552,6 +1555,41 @@ mod tests {
             sig.axes().contains(&BracketAxis::GameChangers),
             "partner-pair name must resolve to either face's signals"
         );
+    }
+
+    #[test]
+    fn export_database_names_the_bundled_list_revision_but_reads_only_stamped_signals() {
+        use crate::database::bracket_lists::BracketLists;
+        // Rhystic Study is on the tracked Game Changers list, but this export
+        // stamped it clean: the export, not the bundled lists, is the authority.
+        let json = r#"{
+            "rhystic study": {
+                "name": "Rhystic Study",
+                "mana_cost": { "type": "NoCost" },
+                "card_type": { "supertypes": [], "core_types": ["Enchantment"], "subtypes": [] },
+                "power": null, "toughness": null, "loyalty": null, "defense": null,
+                "oracle_text": null, "abilities": [], "triggers": [],
+                "static_abilities": [], "replacements": [], "keywords": [],
+                "bracket_signals": {
+                    "game_changer": false, "mass_land_denial": false,
+                    "extra_turn": false, "efficient_tutor": false
+                }
+            }
+        }"#;
+        let db = CardDatabase::from_json_str(json).unwrap();
+
+        let tracked = BracketLists::from_json_path(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/bracket_lists.json"),
+        )
+        .expect("tracked bracket list data must parse");
+        assert!(
+            tracked.signals_for("Rhystic Study").game_changer,
+            "the clean stamp below proves nothing unless the tracked list curates this card"
+        );
+        let bundled = BracketLists::bundled_revision();
+        assert!(!bundled.version.is_empty());
+        assert_eq!(db.bracket_lists_version(), bundled.version);
+        assert!(db.bracket_signals_for("Rhystic Study").is_clean());
     }
 
     #[test]
