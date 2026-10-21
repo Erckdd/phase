@@ -3473,6 +3473,10 @@ mod tests {
         }
     }
 
+    /// v159: coin-flip effects are one `Effect::FlipCoins { flips: CoinFlipRun, .. }`
+    /// and the coin-flip resolution frame's kind becomes `Exactly`/`UntilLoss`.
+    /// A v158 or older peer silently reads a multi-flip or until-loss run as one flip, so
+    /// it must be refused before it receives v159 state.
     /// v157: `ChooseFromZoneConstraint::TotalManaValue` in paused zone choices
     /// and ability state requires a versioned full-game peer.
     ///
@@ -3758,8 +3762,8 @@ mod tests {
     /// `check-protocol-version.mjs` requires the current numeral in this name
     /// and refuses the superseded one.
     #[test]
-    fn protocol_version_is_157_for_total_mana_value_zone_choices() {
-        assert_eq!(PROTOCOL_VERSION, 157);
+    fn protocol_version_is_159_for_coin_flip_runs() {
+        assert_eq!(PROTOCOL_VERSION, 159);
     }
 
     /// The bump alone is inert — a version number nobody enforces prevents no
@@ -3770,6 +3774,7 @@ mod tests {
     ///
     /// REVERT-PROBE: relax to `PROTOCOL_VERSION - 1` — the exact regression
     /// this guards — and this test reds while
+    /// `protocol_version_is_159_for_coin_flip_runs` stays
     /// `protocol_version_is_157_for_total_mana_value_zone_choices` stays
     /// green, which is why the two are separate assertions.
     #[test]

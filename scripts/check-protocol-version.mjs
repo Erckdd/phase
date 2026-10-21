@@ -101,6 +101,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // loyalty-grant sibling variant.
 // v155 carries each parked ChangeZone member's pre-event entry modifications
 // (`ChangeZoneMemberEntry`, CR 603.6a + CR 614.12) in GameState.
+// v159 merges the three coin-flip effects into `Effect::FlipCoins { flips: CoinFlipRun, .. }`
+// and reshapes the coin-flip resolution frame's kind.
 // v156 adds QuantityQuality/NumberQuality (CR 107.1, CR 603.4) to GameState ability conditions,
 // and the optional per-seat created_tokens channel (each seat's pinned creation result) on
 // PendingContinuation's player-scope tail sidecar.
@@ -212,7 +214,9 @@ const UPSTREAM_MAIN_FULL_GAME_PROTOCOL_VERSION = 71;
 // and the optional per-seat `created_tokens` player-scope sidecar channel (each seat's
 // pinned creation result).
 // +86: v157 adds the `ChooseFromZoneConstraint::TotalManaValue` zone-choice constraint.
-const EXPECTED_PROTOCOL_VERSION = UPSTREAM_MAIN_FULL_GAME_PROTOCOL_VERSION + 86;
+// +88: v159 merges the coin-flip effects into `Effect::FlipCoins { flips, .. }` and reshapes the
+//      coin-flip resolution frame's kind.
+const EXPECTED_PROTOCOL_VERSION = UPSTREAM_MAIN_FULL_GAME_PROTOCOL_VERSION + 88;
 // The LOBBY message-set version, not derived from the full-game number above.
 // The classifier below refuses an expression only on the SOURCE constants; this
 // script never reads itself, so its own EXPECTED_* must stay literals.
@@ -324,7 +328,8 @@ const PHASE_TWO_BASE_WIRE_PROTOCOL_VERSION = 54;
 // +83: wire 137 moves with full-game v155 for the pre-event ChangeZone member entries.
 // +84: wire 138 moves with full-game v156 for QuantityQuality and the per-seat created_tokens sidecar channel.
 // +85: wire 139 moves with full-game v157 for TotalManaValue zone choices.
-const EXPECTED_WIRE_PROTOCOL_VERSION = PHASE_TWO_BASE_WIRE_PROTOCOL_VERSION + 85;
+// +87: wire 141 moves with full-game v159 for the merged coin-flip effect.
+const EXPECTED_WIRE_PROTOCOL_VERSION = PHASE_TWO_BASE_WIRE_PROTOCOL_VERSION + 87;
 // The P2P DRAFT wire version. A FIFTH independent surface, and the one this
 // script previously did not read at all: `DRAFT_PROTOCOL_VERSION` is an
 // EXACT-MATCH first-contact gate (p2p-draft-host.ts / p2p-draft-guest.ts refuse

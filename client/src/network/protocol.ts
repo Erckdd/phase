@@ -106,6 +106,12 @@ export function legalActionsFromWire(wire: LegalActionsWire): LegalActionsResult
  * seat or adopts reconnect state.
  *
  * Bumps to date:
+ *  141 — game_setup and state_update carry GameState whose effects carry
+ *       Effect::FlipCoins { flips, .. } in place of FlipCoin, FlipCoins { count }
+ *       and FlipCoinUntilLose, and whose coin-flip resolution frame kind is
+ *       Exactly or UntilLoss. A v140 or older peer reads a multi-flip or until-loss run
+ *       as one flip, so first contact rejects the skew. Bumped in lockstep with
+ *       full-game protocol 159.
  *  139 — ChooseFromZoneConstraint.TotalManaValue extends serialized paused zone
  *       choices and ability state; full-game protocol 157.
  *  138 — game_setup and state_update carry GameState whose ability conditions
@@ -739,7 +745,7 @@ export type P2PInteractionPreviewAnswer =
   | { type: "preview"; preview: InteractionPreview }
   | { type: "failed"; message: string };
 
-export const WIRE_PROTOCOL_VERSION = 139 as const;
+export const WIRE_PROTOCOL_VERSION = 141 as const;
 
 export type P2PMessage = P2PAuthorityWire & (
   | {
