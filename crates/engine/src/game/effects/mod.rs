@@ -6632,6 +6632,41 @@ fn condition_depends_on_effect_performed(condition: &AbilityCondition) -> bool {
     }
 }
 
+/// CR 608.2c: Settle a game-state gate that covers several instructions of one
+/// clause. Returns `ability` with the redundant copies of its own gate removed
+/// from the continuation steps behind it, or `None` when there are none.
+///
+/// "Then if there are three or more landmark counters on it, remove those
+/// counters, transform this artifact, and create three Treasure tokens"
+/// (Treasure Map) lowers to one node per instruction, each carrying the same
+/// `QuantityCheck`. The "if" is checked once, as the clause begins; removing the
+/// counters must not make the following instructions re-read the now-empty
+/// total and skip themselves.
+///
+/// Only a `ContinuationStep` (a within-sentence continuation) with a gate
+/// structurally equal to the head's qualifies: a `SequentialSibling` is a
+/// separate sentence with its own "if", evaluated afresh. Outcome-dependent
+/// gates (`IfYouDo`, `WhenYouDo`) are not game-state checks and are untouched.
+fn settle_shared_continuation_gate(ability: &ResolvedAbility) -> Option<ResolvedAbility> {
+    let gate = ability
+        .condition
+        .as_ref()
+        .filter(|condition| matches!(condition, AbilityCondition::QuantityCheck { .. }))?;
+    let shares_gate = |sub: &ResolvedAbility| {
+        sub.sub_link == SubAbilityLink::ContinuationStep && sub.condition.as_ref() == Some(gate)
+    };
+    if !ability.sub_ability.as_deref().is_some_and(shares_gate) {
+        return None;
+    }
+    let mut settled = ability.clone();
+    let mut node = settled.sub_ability.as_deref_mut();
+    while let Some(sub) = node.filter(|sub| shares_gate(sub)) {
+        sub.condition = None;
+        node = sub.sub_ability.as_deref_mut();
+    }
+    Some(settled)
+}
+
 /// CR 603.12 + CR 615.5: Whether a SUB-ability's own gate makes it resolve even
 /// though its parent's condition was FALSE — the single authority for that
 /// question, with two consumers.
@@ -21399,6 +21434,18 @@ fn resolve_chain_body(
             }
         }
     }
+
+    // CR 608.2c: The gate just evaluated covers the rest of its clause; the
+    // continuation steps behind it must not re-read it after this instruction
+    // has changed the quantity it checks.
+    let settled_gate_ability;
+    let ability = match settle_shared_continuation_gate(ability) {
+        Some(settled) => {
+            settled_gate_ability = settled;
+            &settled_gate_ability
+        }
+        None => ability,
+    };
 
     // Per-iteration optionality must reach the rebound singleton ability before
     // feasibility is decided. In particular, the root's first member can have
