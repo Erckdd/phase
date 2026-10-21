@@ -9068,7 +9068,9 @@ fn protection_target_reads_filter_population(
         | ProtectionTarget::ChosenCardType
         | ProtectionTarget::ChosenPlayer
         | ProtectionTarget::Everything
-        | ProtectionTarget::FromPlayer(_) => false,
+        | ProtectionTarget::FromPlayer(_)
+        // A color set (CR 702.16i) names colors, never an object population.
+        | ProtectionTarget::EachColor(_) => false,
     }
 }
 
