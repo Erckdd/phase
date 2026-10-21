@@ -282,6 +282,8 @@
       "tabWhy": "Pourquoi B{{tier}}",
       "tabBringDown": "Le baisser",
       "commanderTag": "Commandant",
+      "listComma": ", ",
+      "listOr": " ou ",
       "why": {
         "nothingRaises": "Rien dans ce deck ne le place au-dessus de B2, où commence toute estimation.",
         "rulesOutB1": "Ces éléments excluent de déclarer B1 :"

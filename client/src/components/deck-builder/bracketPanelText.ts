@@ -83,5 +83,7 @@ function comboOutcomeText(t: TFunction, outcome: ComboOutcome): string {
 }
 
 export function comboOutcomesText(t: TFunction, outcomes: ComboOutcome[]): string {
-  return outcomes.map((outcome) => comboOutcomeText(t, outcome)).join(", ");
+  return outcomes
+    .map((outcome) => comboOutcomeText(t, outcome))
+    .join(t("bracket.card.listComma"));
 }

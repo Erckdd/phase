@@ -282,6 +282,8 @@
       "tabWhy": "Por qué B{{tier}}",
       "tabBringDown": "Bajarlo",
       "commanderTag": "Comandante",
+      "listComma": ", ",
+      "listOr": " o ",
       "why": {
         "nothingRaises": "Nada en este mazo lo eleva por encima de B2, donde empieza toda estimación.",
         "rulesOutB1": "Esto descarta declarar B1:"

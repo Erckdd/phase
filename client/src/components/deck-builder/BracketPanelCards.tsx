@@ -35,17 +35,24 @@ interface CardListProps {
   onCardClick: (name: string) => void;
 }
 
-const JOINER_TEXT: Record<CardListProps["joiner"], string> = {
-  comma: ", ",
-  or: " or ",
+const JOINER_I18N_KEY: Record<CardListProps["joiner"], string> = {
+  comma: "bracket.card.listComma",
+  or: "bracket.card.listOr",
 };
 
+// A plain inline container, not flex: a flex container drops the spaces at the
+// ends of the separator text nodes. Each name is already `inline-flex`, so it
+// stays whole and the line wraps between names.
 export function BracketPanelCardList({ cards, joiner, onCardClick }: CardListProps) {
+  const { t } = useTranslation("deck-builder");
+  const separator = t(JOINER_I18N_KEY[joiner]);
+
   return (
-    <span className="inline-flex flex-wrap items-center">
+    <span>
       {cards.map((card, index) => (
-        <Fragment key={`${card.role}-${card.name}`}>
-          {index > 0 && JOINER_TEXT[joiner]}
+        // A deck can list a card twice, so the index keeps the key unique.
+        <Fragment key={`${card.role}-${card.name}-${index}`}>
+          {index > 0 && separator}
           <BracketPanelCardName card={card} onCardClick={onCardClick} />
         </Fragment>
       ))}

@@ -17,6 +17,8 @@
       "tabWhy": "为何是 B{{tier}}",
       "tabBringDown": "如何降低",
       "commanderTag": "指挥官",
+      "listComma": "、",
+      "listOr": "或",
       "why": {
         "nothingRaises": "此套牌中没有任何内容使其高于 B2，所有估算都从 B2 起步。",
         "rulesOutB1": "以下原因使其无法声明 B1："

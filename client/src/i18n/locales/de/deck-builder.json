@@ -282,6 +282,8 @@
       "tabWhy": "Warum B{{tier}}",
       "tabBringDown": "Herunterstufen",
       "commanderTag": "Kommandeur",
+      "listComma": ", ",
+      "listOr": " oder ",
       "why": {
         "nothingRaises": "Nichts in diesem Deck hebt es über B2, wo jede Schätzung beginnt.",
         "rulesOutB1": "Diese schließen die Angabe von B1 aus:"

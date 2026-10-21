@@ -282,6 +282,8 @@
       "tabWhy": "Perché B{{tier}}",
       "tabBringDown": "Abbassalo",
       "commanderTag": "Comandante",
+      "listComma": ", ",
+      "listOr": " o ",
       "why": {
         "nothingRaises": "Niente in questo mazzo lo porta sopra B2, da cui parte ogni stima.",
         "rulesOutB1": "Questi escludono la dichiarazione di B1:"

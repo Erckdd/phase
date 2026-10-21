@@ -94,6 +94,22 @@ describe("BracketPanelReason", () => {
     ).toBeInTheDocument();
   });
 
+  it("joins a combo's outcomes with the locale's comma", () => {
+    const reason = reasonOf({
+      kind: "combo_floor",
+      trigger: { kind: "standalone_two_card" },
+      combos: [
+        {
+          pieces: [deck("Piece A"), deck("Piece B")],
+          outcomes: [{ kind: "wins" }, { kind: "unbounded", resource: "mana" }],
+          assemble_cost: 6,
+        },
+      ],
+    });
+    render(<BracketPanelReason reason={reason} onCardClick={vi.fn()} />);
+    expect(screen.getByText(/· Wins the game, Unbounded mana$/)).toBeInTheDocument();
+  });
+
   it("words the owner's answer as the owner's", () => {
     const reason = reasonOf({
         kind: "owner_combo_answer",

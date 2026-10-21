@@ -24,6 +24,16 @@ describe("BracketPanelTrack", () => {
     expect(screen.getByText("B4 ▲")).toBeInTheDocument();
   });
 
+  it("colours each filled segment by its own tier, not the estimate's", () => {
+    const { container } = render(<BracketPanelTrack tier="optimized" declared={null} />);
+    const bar = (n: number) => segment(container, n).children[1];
+    expect(bar(1)).toHaveClass("bg-white/10");
+    expect(bar(2)).toHaveClass("bg-emerald-500");
+    expect(bar(3)).toHaveClass("bg-indigo-500");
+    expect(bar(4)).toHaveClass("bg-amber-500");
+    expect(bar(5)).toHaveClass("bg-white/10");
+  });
+
   it("puts the You marker over the declared bracket", () => {
     const { container } = render(<BracketPanelTrack tier="upgraded" declared={3} />);
     expect(within(segment(container, 3)).getByText("You ▼")).toBeInTheDocument();

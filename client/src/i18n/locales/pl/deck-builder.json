@@ -282,6 +282,8 @@
       "tabWhy": "Dlaczego B{{tier}}",
       "tabBringDown": "Jak obniżyć",
       "commanderTag": "Dowódca",
+      "listComma": ", ",
+      "listOr": " lub ",
       "why": {
         "nothingRaises": "Nic w tej talii nie podnosi jej powyżej B2, od którego zaczyna się każde szacowanie.",
         "rulesOutB1": "Przez to nie można zadeklarować B1:"

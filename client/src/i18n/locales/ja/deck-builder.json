@@ -282,6 +282,8 @@
       "tabWhy": "B{{tier}} の理由",
       "tabBringDown": "下げるには",
       "commanderTag": "統率者",
+      "listComma": "、",
+      "listOr": " または ",
       "why": {
         "nothingRaises": "このデッキには、すべての推定の出発点である B2 を上回る要因はありません。",
         "rulesOutB1": "次の理由により B1 は申告できません:"
