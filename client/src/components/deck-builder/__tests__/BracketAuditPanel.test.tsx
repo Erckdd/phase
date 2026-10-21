@@ -7,6 +7,7 @@ import type {
   BracketCard,
   BracketEstimate,
   BracketReason,
+  CommanderBracket,
   ExplainedCombo,
 } from "../../../types/bracket";
 import plDeckBuilder from "../../../i18n/locales/pl/deck-builder.json";
@@ -141,7 +142,7 @@ function makeEstimate(overrides: Partial<BracketEstimate> = {}): BracketEstimate
   };
 }
 
-function renderPanel(estimate: BracketEstimate, manualBracket: 1 | 2 | 3 | 4 | 5 | null = null) {
+function renderPanel(estimate: BracketEstimate, manualBracket: CommanderBracket | null = null) {
   const ui = (e: BracketEstimate, m: typeof manualBracket) => (
     <BracketAuditPanel estimate={e} manualBracket={m} onCardClick={() => {}} />
   );
@@ -263,6 +264,66 @@ describe("BracketAuditPanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("These rule out declaring B1:")).toBeInTheDocument();
     expect(screen.getByText("Extra Turns: 1")).toBeInTheDocument();
+  });
+
+  it("keeps both tab panels in the page, wired to their tabs, with only the selected one filled", () => {
+    renderPanel(makeEstimate());
+    for (const [name, other] of [
+      ["Why B4", "Bring it down"],
+      ["Bring it down", "Why B4"],
+    ] as const) {
+      fireEvent.click(tab(name));
+      const selected = tab(name);
+      const panel = document.getElementById(selected.getAttribute("aria-controls") ?? "");
+      expect(panel).not.toBeNull();
+      expect(panel).toHaveAttribute("role", "tabpanel");
+      expect(panel).toHaveAttribute("aria-labelledby", selected.id);
+      expect(panel).not.toHaveAttribute("hidden");
+
+      const inactive = document.getElementById(tab(other).getAttribute("aria-controls") ?? "");
+      expect(inactive).not.toBeNull();
+      expect(inactive).toHaveAttribute("role", "tabpanel");
+      expect(inactive).toHaveAttribute("aria-labelledby", tab(other).id);
+      expect(inactive).toHaveAttribute("hidden");
+      expect(inactive?.textContent).toBe("");
+    }
+  });
+
+  it("calls onCardClick with the full card name from a Why reason", () => {
+    const clicked: string[] = [];
+    render(
+      <BracketAuditPanel
+        estimate={makeEstimate()}
+        manualBracket={null}
+        onCardClick={(name) => clicked.push(name)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: ORACLE }));
+    expect(clicked).toEqual([ORACLE]);
+  });
+
+  it("renders the no-commander placeholder", () => {
+    render(
+      <BracketAuditPanel
+        estimate={null}
+        manualBracket={null}
+        emptyReason="no-commander"
+        onCardClick={() => {}}
+      />,
+    );
+    expect(screen.getByText("Add a commander to see your bracket estimate.")).toBeInTheDocument();
+  });
+
+  it("points the partial-coverage button at its list", () => {
+    renderPanel(
+      makeEstimate({
+        coverage: { counted: 8, resolved: 7, unresolved: ["Missing A"], confidence: "partial" },
+      }),
+    );
+    const button = screen.getByRole("button", { name: /card name wasn't found/ });
+    fireEvent.click(button);
+    const list = document.getElementById(button.getAttribute("aria-controls") ?? "");
+    expect(list).toContainElement(screen.getByText("Missing A"));
   });
 
   it("no longer renders the barometer block or the breakdown toggle", () => {

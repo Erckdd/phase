@@ -33,6 +33,7 @@ export function BracketAuditPanel({ estimate, manualBracket, onCardClick, emptyR
   const [tab, setTab] = useState<Tab>("why");
   const [missingOpen, setMissingOpen] = useState(false);
   const idBase = useId();
+  const missingListId = `${idBase}-missing`;
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ why: null, bringDown: null });
 
   if (emptyReason === "not-commander") return null;
@@ -56,9 +57,9 @@ export function BracketAuditPanel({ estimate, manualBracket, onCardClick, emptyR
   // a pregame-conversation tool, the declaration governs above the floor, and a
   // declaration ABOVE the estimate (a cEDH deck over an Optimized floor) is the
   // system working. See `DeclarationVerdict` in game/bracket_estimate.rs.
-  const belowFloor =
+  const belowFloorWarning =
     estimate.declaration?.kind === "below_floor" && manualBracket !== null
-      ? estimate.declaration
+      ? { declared: manualBracket, floor: BRACKET_TIER_NUMERIC[estimate.declaration.floor] }
       : null;
   const { why, steps } = estimate.explanation;
   const unresolved = estimate.coverage.unresolved;
@@ -102,27 +103,25 @@ export function BracketAuditPanel({ estimate, manualBracket, onCardClick, emptyR
         </div>
       </div>
 
-      {belowFloor && manualBracket !== null && (
+      {belowFloorWarning && (
         <p className="mt-2 text-xs text-amber-300">
-          {t("bracket.card.belowFloor", {
-            declared: manualBracket,
-            floor: BRACKET_TIER_NUMERIC[belowFloor.floor],
-          })}
+          {t("bracket.card.belowFloor", belowFloorWarning)}
         </p>
       )}
 
       {estimate.coverage.confidence === "partial" && (
-        <div className="mt-2 text-xs text-slate-400">
+        <div className="mt-2 text-xs text-amber-300">
           <button
             type="button"
             aria-expanded={missingOpen}
+            aria-controls={missingListId}
             onClick={() => setMissingOpen((v) => !v)}
             className="inline-flex min-h-[44px] items-center text-left underline-offset-2 hover:underline sm:min-h-0"
           >
             {t("bracket.card.partialCoverage", { count: unresolved.length })}
           </button>
           {missingOpen && (
-            <ul className="list-disc pl-5 text-slate-300">
+            <ul id={missingListId} className="list-disc pl-5 text-amber-100">
               {unresolved.map((name) => (
                 <li key={name}>{name}</li>
               ))}
@@ -168,37 +167,40 @@ export function BracketAuditPanel({ estimate, manualBracket, onCardClick, emptyR
         })}
       </div>
 
-      {tab === "why" ? (
-        <div
-          role="tabpanel"
-          id={panelId("why")}
-          aria-labelledby={tabId("why")}
-          className="pt-2 text-xs"
-        >
-          {steps.length === 0 && (
-            <p className="text-slate-300">{t("bracket.card.why.nothingRaises")}</p>
-          )}
-          {steps.length === 0 && why.length > 0 && (
-            <p className="mt-1 text-slate-400">{t("bracket.card.why.rulesOutB1")}</p>
-          )}
-          {why.map((reason, index) => (
-            <BracketPanelReason
-              key={`${reason.floor}-${reason.source.kind}-${index}`}
-              reason={reason}
-              onCardClick={onCardClick}
-            />
-          ))}
-        </div>
-      ) : (
-        <div
-          role="tabpanel"
-          id={panelId("bringDown")}
-          aria-labelledby={tabId("bringDown")}
-          className="pt-2"
-        >
-          <BracketPanelLadder steps={steps} onCardClick={onCardClick} />
-        </div>
-      )}
+      <div
+        role="tabpanel"
+        id={panelId("why")}
+        aria-labelledby={tabId("why")}
+        hidden={tab !== "why"}
+        className="pt-2 text-xs"
+      >
+        {tab === "why" && (
+          <>
+            {steps.length === 0 && (
+              <p className="text-slate-300">{t("bracket.card.why.nothingRaises")}</p>
+            )}
+            {steps.length === 0 && why.length > 0 && (
+              <p className="mt-1 text-slate-400">{t("bracket.card.why.rulesOutB1")}</p>
+            )}
+            {why.map((reason, index) => (
+              <BracketPanelReason
+                key={`${reason.floor}-${reason.source.kind}-${index}`}
+                reason={reason}
+                onCardClick={onCardClick}
+              />
+            ))}
+          </>
+        )}
+      </div>
+      <div
+        role="tabpanel"
+        id={panelId("bringDown")}
+        aria-labelledby={tabId("bringDown")}
+        hidden={tab !== "bringDown"}
+        className="pt-2"
+      >
+        {tab === "bringDown" && <BracketPanelLadder steps={steps} onCardClick={onCardClick} />}
+      </div>
 
       <div className="mt-2 border-t border-white/5 pt-2 text-[10px] text-slate-500">
         <span>{t("bracket.dataVersion", { version: estimate.data_version })}</span>

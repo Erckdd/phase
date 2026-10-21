@@ -2,7 +2,6 @@ import type { GameFormat } from "../adapter/types";
 import { formatMetadata } from "../data/formatRegistry";
 import { BRACKET_TIER_NUMERIC, type CommanderBracketTier } from "./bracketEstimate";
 export {
-  BRACKET_AXES,
   BRACKET_TIER_BY_NUMERIC,
   BRACKET_TIER_NUMERIC,
   UNDECLARED_COMBO,
@@ -25,7 +24,6 @@ export {
   type BracketEstimateRequest,
   type CommanderBracketTier,
   type ComboBarometer,
-  type ComboCardinality,
   type ComboCheck,
   type ComboCoverage,
   type ComboDeclaration,
@@ -37,7 +35,6 @@ export {
   type ComboPiece,
   type ComboPieceZone,
   type ComboProvenance,
-  type ComboRelevance,
   type ComboResource,
   type ComboSetup,
   type ComboWindow,
