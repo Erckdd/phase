@@ -10341,52 +10341,39 @@ pub(crate) fn parse_target_player_relative_clause<'a>(
     Ok((rest, filters))
 }
 
+/// CR 608.2d + CR 102.3: a player-choice noun names a choice made as the effect
+/// resolves; an ordinal ("a second player") asks for a player distinct from the
+/// earlier choices, and "an opponent" ranges over the chooser's opponents, the
+/// same domain as a standalone player-choice clause.
+pub(super) fn parse_player_choice_noun(i: &str) -> OracleResult<'_, ChoiceType> {
+    let player_arm = |i| {
+        let (i, _) = tag::<_, _, OracleError<'_>>("a ").parse(i)?;
+        let (i, distinctness) = match super::oracle_util::parse_ordinal(i) {
+            Some((_, rest)) => (rest, PlayerChoiceDistinctness::DistinctFromPriorChoices),
+            None => (i, PlayerChoiceDistinctness::Independent),
+        };
+        let (i, _) = tag::<_, _, OracleError<'_>>("player").parse(i)?;
+        Ok::<_, nom::Err<OracleError<'_>>>((i, ChoiceType::Player { distinctness }))
+    };
+    alt((
+        player_arm,
+        value(ChoiceType::opponent(), tag("an opponent")),
+    ))
+    .parse(i)
+}
+
 fn try_parse_choose_player_to_verb(
     tp: TextPair<'_>,
     ctx: &mut ParseContext,
 ) -> Option<ParsedEffectClause> {
-    // `choose a` prefix (the trailing space/article-`n` belongs to the
-    // head-noun branch). Strip the leading "then " sequence connector when
-    // present so chain entries written as ", then choose an opponent" reach
-    // this helper (the chunk loop's `strip_leading_sequence_connector`
-    // already covers the "Then "-cased forms, but not every chunk-splitter
-    // re-trims here).
+    // Strip the optional sequence connector before parsing the shared noun.
     let after_then = opt(tag::<_, _, OracleError<'_>>("then "))
         .parse(tp.lower)
         .ok()?
         .0;
-    let (after_choose, _) = tag::<_, _, OracleError<'_>>("choose a")
+    let (after_player, mut choice_type) = preceded(tag("choose "), parse_player_choice_noun)
         .parse(after_then)
         .ok()?;
-    // Head noun: " player" (with optional ordinal between article and noun)
-    // or "n opponent" (the article shifts from "a" to "an"; no ordinal slot
-    // — multi-opponent chains aren't a printed pattern). Each axis is a
-    // single `alt()` arm carrying its `ChoiceType` via `value()`.
-    // CR 608.2c (issue #534): the `Opponent` arm restores Skullwinder's
-    // "then choose an opponent" — pre-fix this branch only matched "player"
-    // and silently dropped opponent-form choose clauses.
-    let player_arm = |i| {
-        let (i, _) = tag::<_, _, OracleError<'_>>(" ").parse(i)?;
-        let (i, ordinal_present) = match super::oracle_util::parse_ordinal(i) {
-            Some((_, rest)) => (rest, true),
-            None => (i, false),
-        };
-        let (i, _) = tag::<_, _, OracleError<'_>>("player").parse(i)?;
-        // CR 608.2c: the ordinal ("second"/"third") is the distinctness signal
-        // — see the doc comment above.
-        let distinctness = if ordinal_present {
-            PlayerChoiceDistinctness::DistinctFromPriorChoices
-        } else {
-            PlayerChoiceDistinctness::Independent
-        };
-        Ok::<_, nom::Err<OracleError<'_>>>((i, ChoiceType::Player { distinctness }))
-    };
-    let opponent_arm = value(
-        ChoiceType::opponent(),
-        tag::<_, _, OracleError<'_>>("n opponent"),
-    );
-    let (after_player, mut choice_type) =
-        alt((player_arm, opponent_arm)).parse(after_choose).ok()?;
 
     // CR 102.3 + CR 608.2d: "choose an opponent with the most life [among your
     // opponents]" narrows the pick to the highest-life opponent(s). Attach the
@@ -11967,7 +11954,14 @@ fn parse_effect_clause_inner(text: &str, ctx: &mut ParseContext) -> ParsedEffect
     // consolidate_die_and_coin_defs merges these into the preceding `FlipCoins`.
     if let Some((is_win, effect_text)) = imperative::try_parse_coin_flip_branch(text) {
         let branch_def = {
-            let ir = parse_effect_chain_ir(effect_text, AbilityKind::Spell, ctx);
+            // CR 608.2c: a branch-local player choice indexes after the choices
+            // already made earlier in this resolution (same seam as the chunk fold).
+            let ir = parse_effect_chain_ir_after_player_choices(
+                effect_text,
+                AbilityKind::Spell,
+                ctx,
+                ctx.chosen_player_count,
+            );
             lower_effect_chain_ir(&ir)
         };
         return if is_win {
@@ -42428,15 +42422,50 @@ pub(crate) fn parse_effect_chain_ir(
     kind: AbilityKind,
     ctx: &mut ParseContext,
 ) -> EffectChainIr {
-    let mut ir = parse_effect_chain_ir_body(text, kind, ctx);
+    parse_effect_chain_ir_after_player_choices(text, kind, ctx, 0)
+}
+
+/// [`parse_effect_chain_ir`] for a chain that CONTINUES an enclosing one: a
+/// player chosen in it is the `already_chosen`-th-plus-one player of the
+/// resolution, because the enclosing chain's earlier choices come first at
+/// runtime (CR 608.2c). A fresh chain passes 0.
+pub(crate) fn parse_effect_chain_ir_after_player_choices(
+    text: &str,
+    kind: AbilityKind,
+    ctx: &mut ParseContext,
+    already_chosen: u8,
+) -> EffectChainIr {
+    let mut ir = parse_effect_chain_ir_body(text, kind, ctx, already_chosen);
     per_opponent_choice::enforce_per_opponent_choice_tail(&mut ir);
     ir
+}
+
+/// CR 608.2c: count player choices in this clause's own sequential chain, so
+/// later clauses name the index after every choice already made.
+fn clause_player_choice_count(clause: &ParsedEffectClause) -> u8 {
+    std::iter::once(&clause.effect)
+        .chain(
+            std::iter::successors(clause.sub_ability.as_deref(), |ability| {
+                ability.sub_ability.as_deref()
+            })
+            .map(|ability| &*ability.effect),
+        )
+        .fold(0u8, |count, effect| {
+            count.saturating_add(u8::from(matches!(
+                effect,
+                Effect::Choose {
+                    choice_type: ChoiceType::Player { .. } | ChoiceType::Opponent { .. },
+                    ..
+                }
+            )))
+        })
 }
 
 fn parse_effect_chain_ir_body(
     text: &str,
     kind: AbilityKind,
     ctx: &mut ParseContext,
+    already_chosen_players: u8,
 ) -> EffectChainIr {
     // CR 608.2c: the enclosing chain's player declaration, taken on entry so only
     // the one nested call that set it can read it.
@@ -42629,7 +42658,7 @@ fn parse_effect_chain_ir_body(
     // choose a second player to draw" — the `ChosenPlayer { index }` index and
     // the "they"/"that player controls" anaphor scope both depend on choices
     // made in earlier chunks. Seeded into each `chunk_ctx` and read back after.
-    let mut chain_chosen_player_count: u8 = 0;
+    let mut chain_chosen_player_count: u8 = already_chosen_players;
     let mut chain_chosen_player_scope: Option<ControllerRef> = None;
     // CR 608.2c: Chain-spanning committed `ChoiceType` from a "secretly choose a
     // [value]" producer, carried to a following "an opponent guesses which
@@ -43836,7 +43865,29 @@ fn parse_effect_chain_ir_body(
         if let Some((is_win, effect_text)) = imperative::try_parse_coin_flip_branch(normalized_text)
         {
             let branch_def = {
-                let ir = parse_effect_chain_ir(effect_text, kind, ctx);
+                // CR 608.2c: this fold precedes chunk_ctx's chosen-player
+                // seeding. Carry the enclosing choice into the nested parse,
+                // restoring the caller's scope when that one parse returns.
+                //
+                // The count travels with the scope: a player chosen inside the
+                // branch is appended after the enclosing choices at runtime, so
+                // its `ChosenPlayer` index must start after them.
+                let ir = match chain_chosen_player_scope.as_ref() {
+                    Some(scope) => ctx.with_player_scope(scope.clone(), |ctx| {
+                        parse_effect_chain_ir_after_player_choices(
+                            effect_text,
+                            kind,
+                            ctx,
+                            chain_chosen_player_count,
+                        )
+                    }),
+                    None => parse_effect_chain_ir_after_player_choices(
+                        effect_text,
+                        kind,
+                        ctx,
+                        chain_chosen_player_count,
+                    ),
+                };
                 lower_effect_chain_ir(&ir)
             };
             // CR 705.2: branch-only flip stub; the flipper rides the preceding
@@ -45913,21 +45964,11 @@ fn parse_effect_chain_ir_body(
             _ => clause,
         };
 
-        // CR 608.2c + CR 109.4: After a `Choose(Player)` clause is finalized,
-        // advance the chain's chosen-player counter exactly once. The index is
-        // read (not mutated) inside `try_parse_choose_player_to_verb`, which is
-        // called speculatively (the trial parse above + the real parse). Doing
-        // the increment here — once per finalized chunk — keeps the next
-        // `ChosenPlayer { index }` correct under that double-parse.
-        if matches!(
-            clause.effect,
-            Effect::Choose {
-                choice_type: ChoiceType::Player { .. } | ChoiceType::Opponent { .. },
-                ..
-            }
-        ) {
-            ctx.chosen_player_count = ctx.chosen_player_count.saturating_add(1);
-        }
+        // CR 608.2c: advance once per finalized chunk, including player choices
+        // nested in its own sub-ability chain. Speculative parses only read it.
+        ctx.chosen_player_count = ctx
+            .chosen_player_count
+            .saturating_add(clause_player_choice_count(&clause));
 
         // CR 118.12: After parsing the effect clause, the lowering for
         // `Effect::Counter` carries its own `unless_pay` modifier on the

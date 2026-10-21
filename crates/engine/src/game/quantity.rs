@@ -25654,6 +25654,7 @@ mod tests {
             lose_effect: None,
             kind: crate::types::resolution::PendingCoinFlipKind::Exactly { remaining: 0 },
             chain_root_targets: root.context.chain_root_targets.clone(),
+            branch_context: crate::types::resolution::FlipBranchContext::default(),
         };
 
         let mut events = Vec::new();
