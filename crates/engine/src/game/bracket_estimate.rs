@@ -768,7 +768,7 @@ pub fn estimate_bracket(
 
     let resolved_combo_deck = ResolvedComboDeck::new(deck, db);
     let combos = detect_combos_for_resolved(combo_table, &resolved_combo_deck);
-    contribute_combo_mass_land_denial(&combos, &mut axes);
+    contribute_combo_axes(&combos, &mut axes);
 
     let unresolved: Vec<String> = unresolved.into_iter().collect();
     let confidence = if unresolved.is_empty() {
@@ -961,37 +961,53 @@ fn evaluate_combo_floors(
         .collect()
 }
 
-fn contribute_combo_mass_land_denial(
-    combos: &[ComboMatch],
-    axes: &mut BTreeMap<BracketAxis, AxisReading>,
-) {
-    let relevant: Vec<&ComboMatch> = combos
-        .iter()
-        .filter(|combo| {
-            let contributes = match combo.relevance {
-                ComboRelevance::Helper | ComboRelevance::Contextual => false,
-                ComboRelevance::Standalone => true,
-            };
-            contributes && combo.axes.contains(&BracketAxis::MassLandDenial)
-        })
-        .collect();
-    let reading = axes.entry(BracketAxis::MassLandDenial).or_default();
-    reading.combo_pairs.extend(relevant.iter().map(|combo| {
-        [
-            combo.pieces[0].display.clone(),
-            combo.pieces[1].display.clone(),
-        ]
-    }));
+/// The matched combos that count toward `axis`, in match order. The single authority for
+/// which pairs an axis counts: the estimate adds them to its readings and the explanation
+/// lists them on the axis's card rules.
+pub(crate) fn combo_contributions(combos: &[ComboMatch], axis: BracketAxis) -> Vec<&ComboMatch> {
+    match axis {
+        BracketAxis::MassLandDenial => combos
+            .iter()
+            .filter(|combo| {
+                let contributes = match combo.relevance {
+                    ComboRelevance::Helper | ComboRelevance::Contextual => false,
+                    ComboRelevance::Standalone => true,
+                };
+                contributes && combo.axes.contains(&axis)
+            })
+            .collect(),
+        // The estimator counts pair sources only for mass land denial.
+        BracketAxis::GameChangers | BracketAxis::ExtraTurns | BracketAxis::EfficientTutors => {
+            Vec::new()
+        }
+    }
+}
 
-    for combo in relevant {
-        reading.count = reading.count.saturating_add(1);
-        for piece in &combo.pieces {
-            if !reading
-                .contributing
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case(&piece.display))
-            {
-                reading.contributing.push(piece.display.clone());
+/// Adds each axis's [`combo_contributions`] to its reading: one count per pair, the pair
+/// itself, and each piece name not already contributing.
+fn contribute_combo_axes(combos: &[ComboMatch], axes: &mut BTreeMap<BracketAxis, AxisReading>) {
+    use strum::IntoEnumIterator;
+
+    for axis in BracketAxis::iter() {
+        let relevant = combo_contributions(combos, axis);
+        let reading = axes.entry(axis).or_default();
+        reading.combo_pairs.extend(relevant.iter().map(|combo| {
+            [
+                combo.pieces[0].display.clone(),
+                combo.pieces[1].display.clone(),
+            ]
+        }));
+
+        for combo in relevant {
+            reading.count = reading.count.saturating_add(1);
+            for piece in &combo.pieces {
+                if !reading
+                    .contributing
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(&piece.display))
+                {
+                    reading.contributing.push(piece.display.clone());
+                }
             }
         }
     }

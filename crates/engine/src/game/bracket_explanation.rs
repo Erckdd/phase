@@ -18,11 +18,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::database::{CardDatabase, ComboOutcome};
+use crate::database::{CardDatabase, ComboMatch, ComboOutcome, ComboPiece};
 use crate::game::bracket_estimate::{
-    cards_until_cleared, combo_declaration_rule, AxisReading, BracketAxis, BracketCheck,
-    BracketCheckOutcome, BracketEstimate, ComboDeclaration, ComboFloorTrigger,
-    CommanderBracketTier, BASE_FLOOR,
+    cards_until_cleared, combo_contributions, combo_declaration_rule, AxisReading, BracketAxis,
+    BracketCheck, BracketCheckOutcome, BracketEstimate, ComboCheck, ComboDeclaration,
+    ComboFloorTrigger, CommanderBracketTier, BASE_FLOOR,
 };
 use crate::types::ability::Comparator;
 
@@ -69,7 +69,8 @@ pub enum BracketReasonSource {
         /// Combo pairs counted on this axis (`combo_contributions`).
         combos: Vec<ExplainedCombo>,
     },
-    /// A `COMBO_FLOOR_RULES` row fired. Only combos not shown at a higher tier.
+    /// A `COMBO_FLOOR_RULES` row fired. Only the combos no earlier reason shows, so each
+    /// combo appears at the highest tier that holds it.
     ComboFloor {
         trigger: ComboFloorTrigger,
         combos: Vec<ExplainedCombo>,
@@ -105,7 +106,8 @@ pub enum BracketCut {
         combo: ExplainedCombo,
         remove_one_of: Vec<BracketCard>,
     },
-    /// No deck-card cut is enough: `count` of the commanders in `of` must change.
+    /// No deck-card cut is enough: `count` of the commanders in `of` (never empty) must
+    /// change. A combo whose pieces are both commanders is cleared this way.
     ReplaceCommander { count: u8, of: Vec<BracketCard> },
     /// The reason is the owner's combo answer.
     ChangeComboAnswer,
@@ -143,14 +145,34 @@ impl<'a> CardRoles<'a> {
 
     /// The card `name` names: a commander when its lookup key is a commander's.
     pub(crate) fn card(&self, name: &str) -> BracketCard {
-        let role = if self.commanders.contains(&self.db.lookup_key(name)) {
+        BracketCard {
+            name: name.to_owned(),
+            role: self.role_of(&self.db.lookup_key(name)),
+        }
+    }
+
+    /// A combo piece, named as the table prints it: a commander when its key is a commander's.
+    pub(crate) fn piece(&self, piece: &ComboPiece) -> BracketCard {
+        BracketCard {
+            name: piece.display.clone(),
+            role: self.role_of(&piece.key),
+        }
+    }
+
+    /// A matched combo, with its pieces tagged by role.
+    fn combo(&self, combo: &ComboMatch) -> ExplainedCombo {
+        ExplainedCombo {
+            pieces: combo.pieces.each_ref().map(|piece| self.piece(piece)),
+            outcomes: combo.outcomes.clone(),
+            assemble_cost: combo.assemble_cost,
+        }
+    }
+
+    fn role_of(&self, key: &str) -> BracketCardRole {
+        if self.commanders.contains(key) {
             BracketCardRole::Commander
         } else {
             BracketCardRole::Deck
-        };
-        BracketCard {
-            name: name.to_owned(),
-            role,
         }
     }
 }
@@ -158,11 +180,18 @@ impl<'a> CardRoles<'a> {
 /// Explains `estimate`. `card_readings` are its axis readings before combo pairs were
 /// added, so a reason lists the cards counted by name apart from the pairs.
 ///
-/// Every fired card rule and the owner's combo answer become reasons, grouped by floor;
-/// within a tier, card rules come first in `checks` order, then the owner's answer.
-/// The groups above the base floor form the ladder, highest first; the top group is
-/// `why`. With no group above the base floor there are no steps, and `why` holds the
-/// base-floor reasons.
+/// Every fired card rule, every fired combo floor and the owner's combo answer become
+/// reasons, grouped by floor; within a tier, card rules come first in `checks` order,
+/// then combo floors in `combo_checks` order, then the owner's answer. The groups above
+/// the base floor form the ladder, highest first; the top group is `why`. With no group
+/// above the base floor there are no steps, and `why` holds the base-floor reasons.
+///
+/// Each combo is shown once, at the highest tier that holds it. A card rule keeps every
+/// pair it counted, because they count toward its `observed`. A combo floor lists only
+/// the combos no earlier reason shows, and a floor left with none is not a reason.
+///
+/// Cuts are sufficient: a reason's cuts, taken together, clear it. They never name a
+/// commander while deck cards or pairs suffice.
 pub(crate) fn explain(
     estimate: &BracketEstimate,
     card_readings: &BTreeMap<BracketAxis, AxisReading>,
@@ -172,16 +201,78 @@ pub(crate) fn explain(
         .checks
         .iter()
         .filter(|check| check.outcome == BracketCheckOutcome::Fired)
-        .map(|check| card_rule_reason(check, card_readings, roles));
-    let owner_answer = owner_combo_answer_reason(estimate.combo_barometer.declaration);
-    ladder(estimate.tier, group_by_tier(card_rules.chain(owner_answer)))
+        .map(FiredSource::CardRule);
+    let combo_floors = estimate
+        .combo_checks
+        .iter()
+        .filter(|check| check.outcome == BracketCheckOutcome::Fired)
+        .map(FiredSource::ComboFloor);
+    let owner_answer = owner_combo_answer_reason(estimate.combo_barometer.declaration)
+        .map(FiredSource::OwnerComboAnswer);
+    let mut sources: Vec<FiredSource<'_>> =
+        card_rules.chain(combo_floors).chain(owner_answer).collect();
+    // Highest floor first, so a combo is shown at the highest tier that holds it. The sort
+    // is stable: within a tier, sources keep the order above.
+    sources.sort_by_key(|source| Reverse(source.floor().as_u8()));
+
+    let mut shown: BTreeSet<[&str; 2]> = BTreeSet::new();
+    let mut reasons = Vec::with_capacity(sources.len());
+    for source in sources {
+        match source {
+            FiredSource::CardRule(check) => {
+                let combos = combo_contributions(&estimate.combos, check.axis);
+                shown.extend(combos.iter().map(|combo| combo_identity(combo)));
+                reasons.push(card_rule_reason(check, card_readings, &combos, roles));
+            }
+            FiredSource::ComboFloor(check) => {
+                let unshown: Vec<&ComboMatch> = check
+                    .evidence
+                    .iter()
+                    .filter(|combo| shown.insert(combo_identity(combo)))
+                    .collect();
+                if !unshown.is_empty() {
+                    reasons.push(combo_floor_reason(check, &unshown, roles));
+                }
+            }
+            FiredSource::OwnerComboAnswer(reason) => reasons.push(reason),
+        }
+    }
+    ladder(estimate.tier, group_by_tier(reasons))
 }
 
-/// A fired card rule as a reason: the cards it counted, the most the tier below allows,
-/// and the fewest removals that clear it.
+/// A fired source, before it becomes a reason.
+enum FiredSource<'a> {
+    /// Keeps every pair it counted, since they count toward its `observed`.
+    CardRule(&'a BracketCheck),
+    /// Its reason depends on which of its combos an earlier reason already shows.
+    ComboFloor(&'a ComboCheck),
+    /// Names no combo, so its reason is final.
+    OwnerComboAnswer(BracketReason),
+}
+
+impl FiredSource<'_> {
+    fn floor(&self) -> CommanderBracketTier {
+        match self {
+            Self::CardRule(check) => check.floor,
+            Self::ComboFloor(check) => check.floor,
+            Self::OwnerComboAnswer(reason) => reason.floor,
+        }
+    }
+}
+
+/// A combo's identity: its two piece keys, sorted, so either order names the same pair.
+fn combo_identity(combo: &ComboMatch) -> [&str; 2] {
+    let mut keys = combo.pieces.each_ref().map(|piece| piece.key.as_str());
+    keys.sort_unstable();
+    keys
+}
+
+/// A fired card rule as a reason: the cards and combo pairs it counted, the most the
+/// tier below allows, and the fewest removals that clear it.
 fn card_rule_reason(
     check: &BracketCheck,
     card_readings: &BTreeMap<BracketAxis, AxisReading>,
+    combos: &[&ComboMatch],
     roles: &CardRoles<'_>,
 ) -> BracketReason {
     let need = cards_until_cleared(check.comparator, check.threshold, check.observed)
@@ -199,7 +290,8 @@ fn card_rule_reason(
                 .map(|name| roles.card(name))
                 .collect()
         });
-    let cuts = card_rule_cuts(&cards, need);
+    let combos: Vec<ExplainedCombo> = combos.iter().map(|combo| roles.combo(combo)).collect();
+    let cuts = card_rule_cuts(&cards, &combos, need);
     BracketReason {
         floor: check.floor,
         source: BracketReasonSource::CardRule {
@@ -210,7 +302,7 @@ fn card_rule_reason(
             tier_below,
             allowed_below: check.observed - need,
             cards,
-            combos: Vec::new(),
+            combos,
         },
         official_line: check.official_line.clone(),
         source_document: check.source_document.clone(),
@@ -220,9 +312,9 @@ fn card_rule_reason(
     }
 }
 
-/// The cuts that remove `need` of a card rule's `cards`: deck cards first, and
-/// commanders only for what the deck cards cannot cover.
-fn card_rule_cuts(cards: &[BracketCard], need: u8) -> Vec<BracketCut> {
+/// The cuts that take `need` off a card rule's count of `cards` and `combos`: deck cards
+/// first, then pairs in order, and commanders only for what those cannot cover.
+fn card_rule_cuts(cards: &[BracketCard], combos: &[ExplainedCombo], need: u8) -> Vec<BracketCut> {
     let mut deck_cards = Vec::new();
     let mut commanders = Vec::new();
     for card in cards {
@@ -240,14 +332,70 @@ fn card_rule_cuts(cards: &[BracketCard], need: u8) -> Vec<BracketCut> {
             from: deck_cards,
         });
     }
-    let remaining = need - removed;
+    let broken = (need - removed).min(u8::try_from(combos.len()).unwrap_or(u8::MAX));
+    cuts.extend(
+        combos
+            .iter()
+            .take(usize::from(broken))
+            .cloned()
+            .map(combo_cut),
+    );
+    let remaining = need - removed - broken;
     if remaining > 0 {
+        debug_assert!(
+            !commanders.is_empty(),
+            "a rule's count is its cards plus its pairs, so commanders cover what is left"
+        );
         cuts.push(BracketCut::ReplaceCommander {
             count: remaining,
             of: commanders,
         });
     }
     cuts
+}
+
+/// A fired combo floor as a reason: the combos it shows, and one cut per combo.
+fn combo_floor_reason(
+    check: &ComboCheck,
+    combos: &[&ComboMatch],
+    roles: &CardRoles<'_>,
+) -> BracketReason {
+    let combos: Vec<ExplainedCombo> = combos.iter().map(|combo| roles.combo(combo)).collect();
+    let cuts = combos.iter().cloned().map(combo_cut).collect();
+    BracketReason {
+        floor: check.floor,
+        source: BracketReasonSource::ComboFloor {
+            trigger: check.trigger,
+            combos,
+        },
+        official_line: check.official_line.clone(),
+        source_document: check.source_document.clone(),
+        source_published: check.source_published.clone(),
+        source_url: check.source_url.clone(),
+        cuts,
+    }
+}
+
+/// The cut that breaks `combo`: remove either deck piece, or, when both pieces are
+/// commanders, replace one of them.
+fn combo_cut(combo: ExplainedCombo) -> BracketCut {
+    let deck_pieces: Vec<BracketCard> = combo
+        .pieces
+        .iter()
+        .filter(|piece| piece.role == BracketCardRole::Deck)
+        .cloned()
+        .collect();
+    if deck_pieces.is_empty() {
+        BracketCut::ReplaceCommander {
+            count: 1,
+            of: Vec::from(combo.pieces),
+        }
+    } else {
+        BracketCut::BreakCombo {
+            combo,
+            remove_one_of: deck_pieces,
+        }
+    }
 }
 
 /// The owner's answer to the combo barometer, cited against the published combo line
@@ -294,14 +442,13 @@ fn ladder(estimated: CommanderBracketTier, tiers: Vec<TierReasons>) -> BracketEx
         .into_iter()
         .partition(|group| group.tier.as_u8() > BASE_FLOOR.as_u8());
 
+    debug_assert_eq!(
+        above.first().map_or(BASE_FLOOR, |group| group.tier),
+        estimated,
+        "the estimated tier is the highest reason's floor, or the base floor with none above it"
+    );
     let why = match above.first() {
-        Some(top) => {
-            debug_assert_eq!(
-                top.tier, estimated,
-                "the highest reason's floor is the estimated tier"
-            );
-            top.reasons.clone()
-        }
+        Some(top) => top.reasons.clone(),
         None => rest
             .into_iter()
             .filter(|group| group.tier == BASE_FLOOR)
