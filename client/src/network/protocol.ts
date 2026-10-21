@@ -106,6 +106,8 @@ export function legalActionsFromWire(wire: LegalActionsWire): LegalActionsResult
  * seat or adopts reconnect state.
  *
  * Bumps to date:
+ *  139 — ChooseFromZoneConstraint.TotalManaValue extends serialized paused zone
+ *       choices and ability state; full-game protocol 157.
  *  138 — game_setup and state_update carry GameState whose ability conditions
  *       may carry QuantityQuality/NumberQuality. Bumped in lockstep with
  *       full-game protocol 156, which also adds the optional per-seat
@@ -737,7 +739,7 @@ export type P2PInteractionPreviewAnswer =
   | { type: "preview"; preview: InteractionPreview }
   | { type: "failed"; message: string };
 
-export const WIRE_PROTOCOL_VERSION = 138 as const;
+export const WIRE_PROTOCOL_VERSION = 139 as const;
 
 export type P2PMessage = P2PAuthorityWire & (
   | {

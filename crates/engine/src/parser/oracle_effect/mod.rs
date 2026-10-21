@@ -11120,6 +11120,30 @@ fn parse_effect_clause_inner(text: &str, ctx: &mut ParseContext) -> ParsedEffect
     let text = strip_leading_sequence_connector(text)
         .trim()
         .trim_end_matches('.');
+    // CR 608.2d: a fixed-budget aggregate return lowers to a subset choice; the
+    // checks below keep the shapes that lowering cannot carry honestly red.
+    if imperative::aggregate_return_choice_cardinality(text, ctx).is_some() {
+        let (_, _, remainder) = strip_return_destination_ext_with_remainder(text);
+        // CR 608.2c: the bare-effect compound return lowering cannot carry the
+        // subset choice and its continuation. Keep that shape unsupported.
+        if tag::<_, _, OracleError<'_>>(" and ")
+            .parse(remainder)
+            .is_ok()
+        {
+            return parsed_clause(Effect::unimplemented("return_subset_compound", text));
+        }
+        // CR 608.2c: any other destination rider the shared destination grammar
+        // did not consume (e.g. "with X +1/+1 counters on them") would be
+        // silently dropped by the subset lowering. Recognized riders (tapped,
+        // control, fixed-count counters) are consumed into the destination and
+        // never reach this remainder.
+        if !remainder.trim().is_empty() {
+            return parsed_clause(Effect::unimplemented(
+                "return_subset_unconsumed_rider",
+                text,
+            ));
+        }
+    }
     if text.is_empty() {
         return parsed_clause(Effect::Unimplemented {
             name: "empty".to_string(),
@@ -21909,6 +21933,8 @@ fn try_parse_verb_and_target<'a>(
                         TargetedImperativeAst::ReturnToBattlefield {
                             target,
                             origin,
+                            choice_constraint: None,
+                            choice_cardinality: None,
                             enter_transformed: d.transformed,
                             enters_under,
                             enter_tapped: d.enter_tapped,
@@ -45426,7 +45452,13 @@ fn parse_effect_chain_ir_body(
                 .and_then(|expr| expr.clone())
         });
         if let Some(prefix_condition) = prefix_delayed {
-            let (inner_text, inner_multi_target) = strip_any_number_quantifier(text_after_prefix);
+            let (inner_text, inner_multi_target) =
+                if imperative::aggregate_return_choice_cardinality(text_after_prefix, ctx).is_some()
+                {
+                    (text_after_prefix.to_string(), None)
+                } else {
+                    strip_any_number_quantifier(text_after_prefix)
+                };
             let inner_ir = parse_effect_chain_ir(&inner_text, kind, ctx);
             let mut inner_def = lower_effect_chain_ir(&inner_ir);
             if let Some(spec) = inner_multi_target {
@@ -45592,7 +45624,12 @@ fn parse_effect_chain_ir_body(
         }
 
         let (text_no_temporal, delayed_condition) = strip_temporal_suffix(&text);
-        let (text_no_qty, mut multi_target) = strip_any_number_quantifier(text_no_temporal);
+        let (text_no_qty, mut multi_target) =
+            if imperative::aggregate_return_choice_cardinality(text_no_temporal, ctx).is_some() {
+                (text_no_temporal.to_string(), None)
+            } else {
+                strip_any_number_quantifier(text_no_temporal)
+            };
         let retained_type_clause = {
             let lower = text_no_qty.to_lowercase();
             parse_retained_type_clause(TextPair::new(&text_no_qty, &lower))

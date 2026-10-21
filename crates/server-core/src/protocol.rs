@@ -3473,6 +3473,9 @@ mod tests {
         }
     }
 
+    /// v157: `ChooseFromZoneConstraint::TotalManaValue` in paused zone choices
+    /// and ability state requires a versioned full-game peer.
+    ///
     /// v156: `StaticCondition`, `TriggerCondition` and `AbilityCondition` gain
     /// `QuantityQuality { quantity, quality }` with the new `NumberQuality`
     /// (CR 107.1, CR 603.4), carried in `GameState` ability definitions; a v155
@@ -3755,8 +3758,8 @@ mod tests {
     /// `check-protocol-version.mjs` requires the current numeral in this name
     /// and refuses the superseded one.
     #[test]
-    fn protocol_version_is_156_for_number_quality_conditions() {
-        assert_eq!(PROTOCOL_VERSION, 156);
+    fn protocol_version_is_157_for_total_mana_value_zone_choices() {
+        assert_eq!(PROTOCOL_VERSION, 157);
     }
 
     /// The bump alone is inert — a version number nobody enforces prevents no
@@ -3767,7 +3770,7 @@ mod tests {
     ///
     /// REVERT-PROBE: relax to `PROTOCOL_VERSION - 1` — the exact regression
     /// this guards — and this test reds while
-    /// `protocol_version_is_156_for_number_quality_conditions` stays
+    /// `protocol_version_is_157_for_total_mana_value_zone_choices` stays
     /// green, which is why the two are separate assertions.
     #[test]
     fn full_game_floor_is_current_only_not_a_rollout_window() {

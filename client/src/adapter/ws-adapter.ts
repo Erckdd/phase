@@ -215,6 +215,9 @@ export class NativeEngineVersionMismatchError extends Error {
  * `crates/server-core/src/protocol.rs`. Bump in lockstep when either side
  * adds, removes, renames, or changes the type of a protocol variant field.
  *
+ * 157 — ChooseFromZoneConstraint.TotalManaValue extends serialized paused zone
+ *      choices and ability state. Old native readers cannot decode the new tag.
+ *      Wire 139 moves with it.
  * 156 — StaticCondition, TriggerCondition and AbilityCondition gain
  *      QuantityQuality { quantity, quality } with the new NumberQuality
  *      ({"type":"Prime"} / {"type":"Parity","value":"Odd"|"Even"}), carried
@@ -958,7 +961,7 @@ export class NativeEngineVersionMismatchError extends Error {
  *      every spell frame is byte-identical to v78.
  *
  */
-export const PROTOCOL_VERSION = 156;
+export const PROTOCOL_VERSION = 157;
 
 /**
  * Lowest server protocol version this client will accept in the handshake.
