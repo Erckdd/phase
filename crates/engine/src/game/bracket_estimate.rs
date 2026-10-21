@@ -26,6 +26,7 @@ use crate::database::{
     combo_cardinality, CardDatabase, ComboCardinality, ComboCoverage, ComboEntry, ComboMatch,
     ComboProvenance, ComboRelevance, ComboTable, EarlyComboReading, SignalSource,
 };
+use crate::game::bracket_explanation::{explain, BracketExplanation, CardRoles};
 use crate::game::deck_loading::PlayerDeckList;
 use crate::types::ability::Comparator;
 
@@ -90,6 +91,17 @@ impl CommanderBracketTier {
             Self::Upgraded => 3,
             Self::Optimized => 4,
             Self::Cedh => 5,
+        }
+    }
+
+    /// The tier one bracket lower, or `None` for `Exhibition`, which has nothing below it.
+    pub fn below(self) -> Option<Self> {
+        match self {
+            Self::Exhibition => None,
+            Self::Core => Some(Self::Exhibition),
+            Self::Upgraded => Some(Self::Core),
+            Self::Optimized => Some(Self::Upgraded),
+            Self::Cedh => Some(Self::Optimized),
         }
     }
 }
@@ -201,14 +213,23 @@ pub enum ComboWindow {
 ///   list)", so there is no third row and this function never returns Cedh.
 /// * The 2026-02-09 update made no bracket-level change; these lines are current.
 pub fn combo_declaration_floor(declaration: ComboDeclaration) -> Option<CommanderBracketTier> {
+    combo_declaration_rule(declaration).map(|rule| rule.floor)
+}
+
+/// The published combo line a declaration falls under, or `None` when nothing is
+/// claimed. These are the rows the table-backed combo floors use, so the owner's
+/// answer cites the same official line and source as a measured match.
+pub(crate) fn combo_declaration_rule(
+    declaration: ComboDeclaration,
+) -> Option<&'static ComboFloorRule> {
     match declaration {
         ComboDeclaration::Undeclared | ComboDeclaration::NoneIntended => None,
         ComboDeclaration::Intended {
             window: None | Some(ComboWindow::LateGame),
-        } => Some(CommanderBracketTier::Upgraded),
+        } => Some(&STANDALONE_TWO_CARD_FLOOR),
         ComboDeclaration::Intended {
             window: Some(ComboWindow::EarlyGame),
-        } => Some(CommanderBracketTier::Optimized),
+        } => Some(&EARLY_TWO_CARD_FLOOR),
     }
 }
 
@@ -449,7 +470,7 @@ const COMBO_FLOOR_RULES: &[ComboFloorRule] = &[STANDALONE_TWO_CARD_FLOOR, EARLY_
 /// Exhibition is a claim it has no evidence for. Core is the lowest tier this
 /// estimator can assert. A player whose deck IS thematic declares Bracket 1
 /// themselves; that declaration governs.
-const BASE_FLOOR: CommanderBracketTier = CommanderBracketTier::Core;
+pub(crate) const BASE_FLOOR: CommanderBracketTier = CommanderBracketTier::Core;
 
 /// What a rule did when it was evaluated. Every rule in `FLOOR_RULES` produces
 /// one of these, fired or not, so the reader can see an axis was looked at and
@@ -563,6 +584,10 @@ pub struct BracketEstimate {
     /// Snapshot attribution, present once per estimate rather than per match.
     #[serde(default)]
     pub combo_provenance: Option<ComboProvenance>,
+    /// Why the deck sits at `tier` and what would bring it down. The panel renders it
+    /// verbatim and derives nothing from it.
+    #[serde(default)]
+    pub explanation: BracketExplanation,
 }
 
 /// How a player's declared bracket relates to the floor the deck's contents
@@ -737,6 +762,10 @@ pub fn estimate_bracket(
         }
     }
 
+    // The per-name readings, before combo pairs add to them: the explanation lists
+    // cards and pairs separately, so it needs the card-only evidence.
+    let card_readings = axes.clone();
+
     let resolved_combo_deck = ResolvedComboDeck::new(deck, db);
     let combos = detect_combos_for_resolved(combo_table, &resolved_combo_deck);
     contribute_combo_mass_land_denial(&combos, &mut axes);
@@ -780,7 +809,7 @@ pub fn estimate_bracket(
         ),
     ]);
 
-    Some(BracketEstimate {
+    let mut estimate = BracketEstimate {
         tier,
         axes,
         checks,
@@ -801,7 +830,14 @@ pub fn estimate_bracket(
         combo_checks,
         combo_coverage: combo_table.coverage(),
         combo_provenance: combo_table.provenance().cloned(),
-    })
+        explanation: BracketExplanation::default(),
+    };
+    estimate.explanation = explain(
+        &estimate,
+        &card_readings,
+        &CardRoles::new(&resolved_combo_deck.commanders, db),
+    );
+    Some(estimate)
 }
 
 /// Estimate a deck's bracket and, when the request carries a declaration,
@@ -967,6 +1003,16 @@ fn cards_until_fired(rule: &FloorRule, observed: u8) -> Option<u8> {
         rule.comparator
             .evaluate(i32::from(observed + d), i32::from(rule.threshold))
     })
+}
+
+/// Smallest `d >= 1` whose removal stops a fired rule from firing, or `None` if
+/// removals cannot. The mirror of [`cards_until_fired`].
+pub(crate) fn cards_until_cleared(
+    comparator: Comparator,
+    threshold: u8,
+    observed: u8,
+) -> Option<u8> {
+    (1..=observed).find(|d| !comparator.evaluate(i32::from(observed - d), i32::from(threshold)))
 }
 
 /// Evaluates every cited floor rule and composes the maximum fired floor.
@@ -2003,6 +2049,32 @@ mod tests {
             source: SRC_INTRO,
         };
         assert_eq!(cards_until_fired(&rule, 3), None);
+    }
+
+    #[test]
+    fn cards_until_cleared_mirrors_cards_until_fired() {
+        assert_eq!(cards_until_cleared(Comparator::GE, 4, 5), Some(2));
+        assert_eq!(cards_until_cleared(Comparator::GE, 1, 3), Some(3));
+        assert_eq!(cards_until_cleared(Comparator::GT, 2, 5), Some(3));
+        assert_eq!(cards_until_cleared(Comparator::GE, 0, 3), None);
+        assert_eq!(cards_until_cleared(Comparator::GE, 1, 0), None);
+    }
+
+    #[test]
+    fn below_steps_down_one_tier_and_stops_at_exhibition() {
+        let below: Vec<Option<CommanderBracketTier>> = CommanderBracketTier::iter()
+            .map(CommanderBracketTier::below)
+            .collect();
+        assert_eq!(
+            below,
+            [
+                None,
+                Some(CommanderBracketTier::Exhibition),
+                Some(CommanderBracketTier::Core),
+                Some(CommanderBracketTier::Upgraded),
+                Some(CommanderBracketTier::Optimized),
+            ]
+        );
     }
 
     #[test]

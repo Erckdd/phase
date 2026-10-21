@@ -491,6 +491,7 @@ mod tests {
                     combo_checks: Default::default(),
                     combo_coverage: Default::default(),
                     combo_provenance: Default::default(),
+                    explanation: Default::default(),
                 }),
             },
         }

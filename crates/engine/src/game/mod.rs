@@ -21,6 +21,7 @@ pub mod bracket_estimate;
 // Mirrors `analysis::corpus`'s `combo-verify` gate (analysis/mod.rs:43-46).
 #[cfg(any(test, feature = "bracket-corpus"))]
 pub mod bracket_corpus;
+pub mod bracket_explanation;
 pub mod card_subset;
 pub mod casting;
 pub(crate) mod casting_costs;
@@ -246,6 +247,10 @@ pub use bracket_estimate::{
     BracketEstimate, BracketEstimateRequest, ComboBarometer, ComboCheck, ComboDeclaration,
     ComboFloorRule, ComboFloorTrigger, ComboWindow, CommanderBracketTier, DeclarationVerdict,
     EstimateConfidence, FloorRule, FloorRuleSource, EARLY_ASSEMBLE_CEILING,
+};
+pub use bracket_explanation::{
+    BracketCard, BracketCardRole, BracketCut, BracketExplanation, BracketLadderStep, BracketReason,
+    BracketReasonSource, ExplainedCombo,
 };
 // Plumbing: read-only re-export of the X-affordability authority
 // (`max_x_value`) and the cost-leg extractor that feeds it

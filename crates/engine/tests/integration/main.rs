@@ -129,6 +129,7 @@ mod bound_by_moonsilver_sacrifice_source_relative_6017;
 mod bracket_axis_readings;
 mod bracket_combo_declaration;
 mod bracket_corpus;
+mod bracket_explanation;
 mod bracket_fixture_signals;
 mod bracket_lists_data;
 mod bracket_tier_reconciliation;
