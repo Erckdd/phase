@@ -1,5 +1,67 @@
 {
   "bracket": {
+    "card": {
+      "estimatedLabel": "估算分级",
+      "tierName": "B{{tier}} {{label}}",
+      "tierShort": "B{{tier}}",
+      "declaredNone": "已声明：无",
+      "declared": "已声明：B{{tier}} {{label}}",
+      "youMarker": "你",
+      "belowFloor": "你声明了 B{{declared}}，但此套牌不能低于 B{{floor}}。AI 将按你声明的 B{{declared}} 游玩。",
+      "partialCoverage_one": "有 {{count}} 个卡名未找到；计数可能偏低",
+      "partialCoverage_few": "有 {{count}} 个卡名未找到；计数可能偏低",
+      "partialCoverage_many": "有 {{count}} 个卡名未找到；计数可能偏低",
+      "partialCoverage_other": "有 {{count}} 个卡名未找到；计数可能偏低",
+      "combosUnchecked": "此版本未检查二卡组合技。回答上方的组合技问题即可将其纳入。",
+      "tabsLabel": "分级详情",
+      "tabWhy": "为何是 B{{tier}}",
+      "tabBringDown": "如何降低",
+      "commanderTag": "指挥官",
+      "why": {
+        "nothingRaises": "此套牌中没有任何内容使其高于 B2，所有估算都从 B2 起步。",
+        "rulesOutB1": "以下原因使其无法声明 B1："
+      },
+      "reason": {
+        "cardRule": "{{axis}}：{{count}}",
+        "comboStandalone": "二卡组合技",
+        "comboEarly": "早期二卡组合技",
+        "ownerAnswer": "你的组合技回答",
+        "ownerIntended": "你表示此套牌有刻意构建的二卡组合技。",
+        "ownerIntendedEarly": "你表示此套牌有早期的二卡组合技。",
+        "ownerIntendedLate": "你表示此套牌有后期才能凑齐的二卡组合技。",
+        "comboFromTable": "（组合技）"
+      },
+      "combo": {
+        "assembles": "花费 {{cost}} 点法术力组装"
+      },
+      "explain": {
+        "cardRule": "B{{tier}} 最多允许 {{allowed}}；此套牌有 {{observed}}。",
+        "cardRuleNone": "B{{tier}} 不允许；此套牌有 {{observed}}。",
+        "comboStandalone": "B1 和 B2 不允许刻意构建的二卡无限组合技。",
+        "comboEarly": "B3 仅允许后期才能凑齐的二卡组合技（超过 {{ceiling}} 点法术力）。",
+        "ownerAnswer": "phase 无法核实此回答，将直接采用你的说法。可在上方的组合技问题中修改。"
+      },
+      "source": "{{document}}，{{published}} ↗",
+      "ladder": {
+        "removeAll_one": "移除它：",
+        "removeAll_few": "移除全部 {{count}} 张：",
+        "removeAll_many": "移除全部 {{count}} 张：",
+        "removeAll_other": "移除全部 {{count}} 张：",
+        "removeSome_one": "从以下牌中移除 {{count}} 张：",
+        "removeSome_few": "从以下牌中移除 {{count}} 张：",
+        "removeSome_many": "从以下牌中移除 {{count}} 张：",
+        "removeSome_other": "从以下牌中移除 {{count}} 张：",
+        "breakCombo": "拆掉组合技",
+        "removeOneOf": "移除以下其中一张：",
+        "removeThis": "移除：",
+        "replaceCommander_one": "要进一步降低，还需要更换指挥官：",
+        "replaceCommander_few": "要进一步降低，还需要更换指挥官（{{count}} 个）：",
+        "replaceCommander_many": "要进一步降低，还需要更换指挥官（{{count}} 个）：",
+        "replaceCommander_other": "要进一步降低，还需要更换指挥官（{{count}} 个）：",
+        "changeComboAnswer": "请在上方的问题中修改你的组合技回答。",
+        "footnote": "B2 是估算的最低值；B1 取决于套牌主题。"
+      }
+    },
     "aboutBrackets": "关于分级 ↗",
     "addCommander": "添加指挥官以查看分级估算。",
     "dataVersion": "数据：{{version}}",
