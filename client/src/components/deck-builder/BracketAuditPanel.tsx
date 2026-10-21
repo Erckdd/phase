@@ -7,7 +7,6 @@ import {
   BRACKET_LABEL,
   BRACKET_TIER_CHIP_CLASS,
   BRACKET_TIER_NUMERIC,
-  type BracketAxis,
   type BracketEstimate,
   type Barometer,
   type BarometerAuthority,
@@ -15,8 +14,8 @@ import {
   type ComboCardinality,
   type ComboMatch,
   type ComboRelevance,
-  type ComboResource,
 } from "../../types/bracket";
+import { AXIS_I18N_KEY, COMBO_RESOURCE_I18N_KEY } from "./bracketPanelText";
 
 interface Props {
   estimate: BracketEstimate | null;
@@ -31,13 +30,6 @@ interface Props {
   emptyReason?: "not-commander" | "no-commander" | "card-data-unavailable";
 }
 
-const AXIS_I18N_KEY: Record<BracketAxis, string> = {
-  game_changers: "bracket.axis.gameChangers",
-  mass_land_denial: "bracket.axis.massLandDenial",
-  extra_turns: "bracket.axis.extraTurns",
-  efficient_tutors: "bracket.axis.efficientTutors",
-};
-
 const BAROMETER_I18N_KEY: Record<Barometer, string> = {
   game_changers: "comboBarometer.rowGameChangers",
   extra_turns: "comboBarometer.rowExtraTurns",
@@ -49,18 +41,6 @@ const AUTHORITY_I18N_KEY: Record<BarometerAuthority, string> = {
   engine: "comboBarometer.authorityEngine",
   deck_owner: "comboBarometer.authorityDeckOwner",
   unanswered: "comboBarometer.authorityUnanswered",
-};
-
-const COMBO_RESOURCE_I18N_KEY: Record<ComboResource, string> = {
-  mana: "bracket.combo.resource.mana",
-  damage: "bracket.combo.resource.damage",
-  life_loss: "bracket.combo.resource.lifeLoss",
-  lifegain: "bracket.combo.resource.lifegain",
-  mill: "bracket.combo.resource.mill",
-  draw: "bracket.combo.resource.draw",
-  tokens: "bracket.combo.resource.tokens",
-  combat: "bracket.combo.resource.combat",
-  turns: "bracket.combo.resource.turns",
 };
 
 const COMBO_CARDINALITY_I18N_KEY: Record<ComboCardinality, string> = {
