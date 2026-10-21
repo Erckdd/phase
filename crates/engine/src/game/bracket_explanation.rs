@@ -69,8 +69,9 @@ pub enum BracketReasonSource {
         /// Combo pairs counted on this axis (`combo_contributions`).
         combos: Vec<ExplainedCombo>,
     },
-    /// A `COMBO_FLOOR_RULES` row fired. Only the combos no earlier reason shows, so each
-    /// combo appears at the highest tier that holds it.
+    /// A `COMBO_FLOOR_RULES` row fired. In `why`, every combo it fired on. In `steps`, only
+    /// the combos no earlier reason shows, so each combo appears at one step: the highest
+    /// that holds it.
     ComboFloor {
         trigger: ComboFloorTrigger,
         combos: Vec<ExplainedCombo>,
@@ -124,10 +125,13 @@ pub struct BracketLadderStep {
 /// Why the deck sits at its estimated tier, and the ladder of steps down.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BracketExplanation {
-    /// Above the base floor: the reasons whose floor is the estimated tier. At the base
-    /// floor: the base-floor rules that fired (they rule out declaring Exhibition), possibly none.
+    /// Every reason whose floor is the estimated tier, each listing every combo it fired
+    /// on. At the base floor: the base-floor rules that fired (they rule out declaring
+    /// Exhibition), possibly none.
     pub why: Vec<BracketReason>,
-    /// Highest first; empty exactly when the estimate is at the base floor.
+    /// Highest first; empty exactly when the estimate is at the base floor. Each combo
+    /// appears at one step only, so a combo floor in the first step can list fewer combos
+    /// than it does in `why`, or be left out.
     pub steps: Vec<BracketLadderStep>,
 }
 
@@ -181,17 +185,24 @@ impl<'a> CardRoles<'a> {
 /// added, so a reason lists the cards counted by name apart from the pairs.
 ///
 /// Every fired card rule, every fired combo floor and the owner's combo answer become
-/// reasons, grouped by floor; within a tier, card rules come first in `checks` order,
-/// then combo floors in `combo_checks` order, then the owner's answer. The groups above
-/// the base floor form the ladder, highest first; the top group is `why`. With no group
-/// above the base floor there are no steps, and `why` holds the base-floor reasons.
+/// reasons; within a tier, card rules come first in `checks` order, then combo floors in
+/// `combo_checks` order, then the owner's answer.
 ///
-/// Each combo is shown once, at the highest tier that holds it. A card rule keeps every
-/// pair it counted, because they count toward its `observed`. A combo floor lists only
-/// the combos no earlier reason shows, and a floor left with none is not a reason.
+/// `why` lists every reason whose floor is the estimated tier, each with every combo it
+/// fired on. At the base floor these are the base-floor reasons, possibly none.
 ///
-/// Cuts are sufficient: a reason's cuts, taken together, clear it. They never name a
-/// commander while deck cards or pairs suffice.
+/// The ladder groups the reasons above the base floor by tier, highest first, and shows
+/// each combo once, at the highest tier that holds it. A card rule keeps every pair it
+/// counted, because they count toward its `observed`. A combo floor lists only the
+/// combos no earlier reason shows, and a floor left with none is not a step's reason. So
+/// a pair that both a card rule and a combo floor at the estimated tier count is under
+/// both reasons in `why`, and under the card rule alone in the first step.
+///
+/// Cuts are sufficient per step: once a step's cuts and those of every step above it are
+/// done, the deck lands on that step's `lands_on`. One reason's cuts need not clear it on
+/// their own: a combo floor whose pairs a card rule at its tier partly shows keeps firing
+/// until that rule's cut is done. Cuts never name a commander while deck cards or pairs
+/// suffice.
 pub(crate) fn explain(
     estimate: &BracketEstimate,
     card_readings: &BTreeMap<BracketAxis, AxisReading>,
@@ -215,47 +226,79 @@ pub(crate) fn explain(
     // is stable: within a tier, sources keep the order above.
     sources.sort_by_key(|source| Reverse(source.floor().as_u8()));
 
+    let why = sources
+        .iter()
+        .filter(|source| source.floor() == estimate.tier)
+        .map(|source| source.reason(&source.combos(estimate), card_readings, roles))
+        .collect();
+
     let mut shown: BTreeSet<[&str; 2]> = BTreeSet::new();
-    let mut reasons = Vec::with_capacity(sources.len());
-    for source in sources {
-        match source {
-            FiredSource::CardRule(check) => {
-                let combos = combo_contributions(&estimate.combos, check.axis);
+    let ladder_reasons = sources.iter().filter_map(|source| {
+        let combos = source.combos(estimate);
+        let listed = match source {
+            FiredSource::CardRule(_) | FiredSource::OwnerComboAnswer(_) => {
                 shown.extend(combos.iter().map(|combo| combo_identity(combo)));
-                reasons.push(card_rule_reason(check, card_readings, &combos, roles));
+                combos
             }
-            FiredSource::ComboFloor(check) => {
-                let unshown: Vec<&ComboMatch> = check
-                    .evidence
-                    .iter()
+            FiredSource::ComboFloor(_) => {
+                let unshown: Vec<&ComboMatch> = combos
+                    .into_iter()
                     .filter(|combo| shown.insert(combo_identity(combo)))
                     .collect();
-                if !unshown.is_empty() {
-                    reasons.push(combo_floor_reason(check, &unshown, roles));
+                if unshown.is_empty() {
+                    return None;
                 }
+                unshown
             }
-            FiredSource::OwnerComboAnswer(reason) => reasons.push(reason),
-        }
-    }
-    ladder(estimate.tier, group_by_tier(reasons))
+        };
+        Some(source.reason(&listed, card_readings, roles))
+    });
+    let steps = ladder(estimate.tier, group_by_tier(ladder_reasons));
+
+    BracketExplanation { why, steps }
 }
 
 /// A fired source, before it becomes a reason.
 enum FiredSource<'a> {
-    /// Keeps every pair it counted, since they count toward its `observed`.
+    /// Lists every pair it counted, since they count toward its `observed`.
     CardRule(&'a BracketCheck),
-    /// Its reason depends on which of its combos an earlier reason already shows.
+    /// In the ladder, lists only the combos no earlier reason shows.
     ComboFloor(&'a ComboCheck),
     /// Names no combo, so its reason is final.
     OwnerComboAnswer(BracketReason),
 }
 
-impl FiredSource<'_> {
+impl<'a> FiredSource<'a> {
     fn floor(&self) -> CommanderBracketTier {
         match self {
             Self::CardRule(check) => check.floor,
             Self::ComboFloor(check) => check.floor,
             Self::OwnerComboAnswer(reason) => reason.floor,
+        }
+    }
+
+    /// Every combo this source fired on: the pairs a card rule counted, or a combo
+    /// floor's evidence.
+    fn combos(&self, estimate: &'a BracketEstimate) -> Vec<&'a ComboMatch> {
+        match self {
+            Self::CardRule(check) => combo_contributions(&estimate.combos, check.axis),
+            Self::ComboFloor(check) => check.evidence.iter().collect(),
+            Self::OwnerComboAnswer(_) => Vec::new(),
+        }
+    }
+
+    /// This source's reason, listing `combos`: all of [`Self::combos`] for a card rule,
+    /// whose count includes them, and any non-empty subset of them for a combo floor.
+    fn reason(
+        &self,
+        combos: &[&ComboMatch],
+        card_readings: &BTreeMap<BracketAxis, AxisReading>,
+        roles: &CardRoles<'_>,
+    ) -> BracketReason {
+        match self {
+            Self::CardRule(check) => card_rule_reason(check, card_readings, combos, roles),
+            Self::ComboFloor(check) => combo_floor_reason(check, combos, roles),
+            Self::OwnerComboAnswer(reason) => reason.clone(),
         }
     }
 }
@@ -313,7 +356,8 @@ fn card_rule_reason(
 }
 
 /// The cuts that take `need` off a card rule's count of `cards` and `combos`: deck cards
-/// first, then pairs in order, and commanders only for what those cannot cover.
+/// first, then pairs with a deck piece, then commander-only pairs, each in order, and
+/// commanders only for what those cannot cover.
 fn card_rule_cuts(cards: &[BracketCard], combos: &[ExplainedCombo], need: u8) -> Vec<BracketCut> {
     let mut deck_cards = Vec::new();
     let mut commanders = Vec::new();
@@ -333,9 +377,18 @@ fn card_rule_cuts(cards: &[BracketCard], combos: &[ExplainedCombo], need: u8) ->
         });
     }
     let broken = (need - removed).min(u8::try_from(combos.len()).unwrap_or(u8::MAX));
+    // A pair with a deck piece breaks without touching a commander, so those go first.
+    let (breakable, commander_only): (Vec<&ExplainedCombo>, Vec<&ExplainedCombo>) =
+        combos.iter().partition(|combo| {
+            combo
+                .pieces
+                .iter()
+                .any(|piece| piece.role == BracketCardRole::Deck)
+        });
     cuts.extend(
-        combos
-            .iter()
+        breakable
+            .into_iter()
+            .chain(commander_only)
             .take(usize::from(broken))
             .cloned()
             .map(combo_cut),
@@ -435,26 +488,20 @@ fn group_by_tier(reasons: impl IntoIterator<Item = BracketReason>) -> Vec<TierRe
     tiers.into_values().collect()
 }
 
-/// Builds `why` and the ladder from tier groups ordered highest first. Each step lands
-/// on the next group's tier, and the last lands on the base floor.
-fn ladder(estimated: CommanderBracketTier, tiers: Vec<TierReasons>) -> BracketExplanation {
-    let (above, rest): (Vec<TierReasons>, Vec<TierReasons>) = tiers
+/// Builds the ladder from tier groups ordered highest first: one step per group above
+/// the base floor. Each step lands on the next group's tier, and the last lands on the
+/// base floor.
+fn ladder(estimated: CommanderBracketTier, tiers: Vec<TierReasons>) -> Vec<BracketLadderStep> {
+    let above: Vec<TierReasons> = tiers
         .into_iter()
-        .partition(|group| group.tier.as_u8() > BASE_FLOOR.as_u8());
+        .filter(|group| group.tier.as_u8() > BASE_FLOOR.as_u8())
+        .collect();
 
     debug_assert_eq!(
         above.first().map_or(BASE_FLOOR, |group| group.tier),
         estimated,
         "the estimated tier is the highest reason's floor, or the base floor with none above it"
     );
-    let why = match above.first() {
-        Some(top) => top.reasons.clone(),
-        None => rest
-            .into_iter()
-            .filter(|group| group.tier == BASE_FLOOR)
-            .flat_map(|group| group.reasons)
-            .collect(),
-    };
 
     let landings: Vec<CommanderBracketTier> = above
         .iter()
@@ -462,14 +509,49 @@ fn ladder(estimated: CommanderBracketTier, tiers: Vec<TierReasons>) -> BracketEx
         .map(|group| group.tier)
         .chain(std::iter::once(BASE_FLOOR))
         .collect();
-    let steps = above
+    above
         .into_iter()
         .zip(landings)
         .map(|(group, lands_on)| BracketLadderStep {
             lands_on,
             reasons: group.reasons,
         })
-        .collect();
+        .collect()
+}
 
-    BracketExplanation { why, steps }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card(name: &str, role: BracketCardRole) -> BracketCard {
+        BracketCard {
+            name: name.to_owned(),
+            role,
+        }
+    }
+
+    fn pair(first: BracketCard, second: BracketCard) -> ExplainedCombo {
+        ExplainedCombo {
+            pieces: [first, second],
+            outcomes: BTreeSet::from([ComboOutcome::Wins]),
+            assemble_cost: 4,
+        }
+    }
+
+    #[test]
+    fn a_pair_with_a_deck_piece_is_cut_before_a_commander_only_pair() {
+        let partner_a = card("Partner A", BracketCardRole::Commander);
+        let partner_b = card("Partner B", BracketCardRole::Commander);
+        let piece = card("Piece", BracketCardRole::Deck);
+        let commander_only = pair(partner_a.clone(), partner_b);
+        let breakable = pair(partner_a, piece.clone());
+
+        assert_eq!(
+            card_rule_cuts(&[], &[commander_only, breakable.clone()], 1),
+            [BracketCut::BreakCombo {
+                combo: breakable,
+                remove_one_of: vec![piece],
+            }]
+        );
+    }
 }

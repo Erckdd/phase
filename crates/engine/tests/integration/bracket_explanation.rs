@@ -537,7 +537,7 @@ fn mass_land_denial_from_a_pair_is_cleared_by_breaking_the_pair() {
 }
 
 #[test]
-fn a_pair_the_card_rule_counts_is_not_repeated_by_a_combo_floor_at_its_tier() {
+fn a_pair_a_card_rule_and_a_combo_floor_both_count_is_in_both_whys_but_one_step() {
     let estimate = estimate_with(
         &deck(&["Cmdr"], &[EATER, FEEDER]),
         &db(&[], &[], &[]),
@@ -549,20 +549,34 @@ fn a_pair_the_card_rule_counts_is_not_repeated_by_a_combo_floor_at_its_tier() {
         )]),
     );
     let e = &estimate.explanation;
+    let land_combo = pair(card(EATER), card(FEEDER), 2);
 
     assert_eq!(estimate.tier, CommanderBracketTier::Optimized);
-    assert_eq!(e.why.len(), 1, "the early floor's copy is dropped at B4");
+    assert_eq!(
+        e.why.len(),
+        2,
+        "why lists every reason at B4 as it fired: {:?}",
+        e.why
+    );
     let BracketReasonSource::CardRule { axis, combos, .. } = &e.why[0].source else {
         panic!("expected a card rule, got {:?}", e.why[0].source);
     };
     assert_eq!(*axis, BracketAxis::MassLandDenial);
-    assert_eq!(*combos, [pair(card(EATER), card(FEEDER), 2)]);
+    assert_eq!(*combos, std::slice::from_ref(&land_combo));
+    assert_eq!(
+        e.why[1].source,
+        BracketReasonSource::ComboFloor {
+            trigger: EARLY_TWO_CARD,
+            combos: vec![land_combo],
+        }
+    );
     assert_eq!(
         e.steps,
         [BracketLadderStep {
             lands_on: CommanderBracketTier::Core,
-            reasons: e.why.clone(),
-        }]
+            reasons: vec![e.why[0].clone()],
+        }],
+        "the step shows the pair once, under the card rule"
     );
 }
 
@@ -680,4 +694,79 @@ fn unmeasured_combos_give_no_combo_reasons_and_an_unanswered_barometer() {
             }
         }
     }
+}
+
+#[test]
+fn a_combo_floor_with_two_combos_breaks_each_pair() {
+    let estimate = estimate_with(
+        &deck(&["Cmdr"], &["A", "B", "C", "D"]),
+        &db(&[], &[], &[]),
+        &table(vec![combo("A", "B", 3, &[]), combo("C", "D", 4, &[])]),
+    );
+    let e = &estimate.explanation;
+    let first = pair(card("A"), card("B"), 3);
+    let second = pair(card("C"), card("D"), 4);
+
+    assert_eq!(estimate.tier, CommanderBracketTier::Optimized);
+    assert_eq!(e.why.len(), 1);
+    assert_eq!(
+        e.why[0].source,
+        BracketReasonSource::ComboFloor {
+            trigger: EARLY_TWO_CARD,
+            combos: vec![first.clone(), second.clone()],
+        }
+    );
+    assert_eq!(
+        e.why[0].cuts,
+        [
+            BracketCut::BreakCombo {
+                combo: first,
+                remove_one_of: vec![card("A"), card("B")],
+            },
+            BracketCut::BreakCombo {
+                combo: second,
+                remove_one_of: vec![card("C"), card("D")],
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_land_denial_pair_of_partner_commanders_needs_a_different_commander() {
+    let estimate = estimate_with(
+        &deck(&["Partner A", "Partner B"], &[]),
+        &db(&[], &[], &[]),
+        &table(vec![combo(
+            "Partner A",
+            "Partner B",
+            10,
+            &[BracketAxis::MassLandDenial],
+        )]),
+    );
+    let e = &estimate.explanation;
+
+    assert_eq!(estimate.tier, CommanderBracketTier::Optimized);
+    assert_eq!(e.why.len(), 1);
+    let BracketReasonSource::CardRule {
+        axis,
+        cards,
+        combos,
+        ..
+    } = &e.why[0].source
+    else {
+        panic!("expected a card rule, got {:?}", e.why[0].source);
+    };
+    assert_eq!(*axis, BracketAxis::MassLandDenial);
+    assert!(cards.is_empty());
+    assert_eq!(
+        *combos,
+        [pair(commander("Partner A"), commander("Partner B"), 10)]
+    );
+    assert_eq!(
+        e.why[0].cuts,
+        [BracketCut::ReplaceCommander {
+            count: 1,
+            of: vec![commander("Partner A"), commander("Partner B")],
+        }]
+    );
 }
