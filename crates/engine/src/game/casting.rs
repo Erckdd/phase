@@ -28375,6 +28375,26 @@ pub(crate) fn record_activation_announcement(
         .get(&source_id)
         .map(|source| source.activated_ability_provenance(ability_index));
     ability.set_source_ability_provenance_recursive(provenance);
+    // CR 400.7 + CR 602.2a: capture the source incarnation at this announcement
+    // — the authoritative pre-payment moment (CR 602.2a creates the ability
+    // here; CR 602.2b routes the remainder through the spell-casting steps, so
+    // this precedes every cost, CR 601.2h). A cost that moves the source
+    // (self-sacrifice, self-exile) advances the storage object's incarnation
+    // before stack placement; the source-subject condition gate must read the
+    // announced source's exit last-known information (CR 113.7a, CR 608.2h)
+    // rather than the moved object's cleared state. The capture goes to its own
+    // field: `source_incarnation` keeps the as-placed epoch for the consumers
+    // that reconstruct the source as it was put on the stack (Embalm-family
+    // copy sources, host references, craft returns). An existing capture is
+    // never overwritten: the earliest announcement wins.
+    if ability.announced_source_incarnation.is_none() {
+        ability.set_announced_source_incarnation_recursive(
+            state
+                .objects
+                .get(&source_id)
+                .map(|source| source.incarnation),
+        );
+    }
 }
 
 /// [`capture_activation_record`] from an ability definition and its committed
@@ -29689,6 +29709,7 @@ fn filter_prop_reads_chosen_target(prop: &FilterProp, read: TargetRead) -> bool 
         | FilterProp::NotColor { .. }
         | FilterProp::NotSupertype { .. }
         | FilterProp::Suspected
+        | FilterProp::Prepared
         | FilterProp::Renowned
         | FilterProp::Goaded
         | FilterProp::ToughnessGTPower

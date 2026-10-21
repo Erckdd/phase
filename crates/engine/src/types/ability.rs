@@ -7430,6 +7430,10 @@ pub enum FilterProp {
     /// CR 701.15b/c: Matches creatures with the goaded designation (at least one
     /// player has goaded it).
     Goaded,
+    /// CR 722.3a: Matches permanents with the prepared designation. A permanent
+    /// can only gain this designation if it has a prepare spell, and only while
+    /// it does not already have it.
+    Prepared,
     /// CR 510.1c: Matches creatures whose toughness is greater than their power.
     ToughnessGTPower,
     /// CR 208.1 + CR 613.4a + CR 613.4b: Matches a creature whose current
@@ -36891,8 +36895,23 @@ pub struct ResolvedAbility {
     /// The full `trigger_source` context remains the authority for all triggered
     /// source facts; this field preserves the source epoch for activated and
     /// delayed self-transform abilities that do not carry trigger provenance.
+    /// For an activated ability this is the epoch the source had as the ability
+    /// was put on the stack, after its costs were paid — the reference point the
+    /// source-reconstruction consumers (Embalm/Eternalize/Encore copy sources,
+    /// aura and equipment host references, craft returns) look the source up
+    /// by. The announcement epoch is a separate field
+    /// (`announced_source_incarnation`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_incarnation: Option<u64>,
+    /// CR 400.7 + CR 602.2a: Exact source incarnation captured at an
+    /// activation's announcement (`casting::record_activation_announcement`),
+    /// before any cost that moves the source is paid (CR 601.2h). The
+    /// source-subject condition gate reads this epoch for activated abilities,
+    /// so a cost that moves the source (self-sacrifice, self-exile) cannot
+    /// rebind the condition to the moved object's live state; an existing
+    /// capture is never overwritten, and stack placement never restamps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub announced_source_incarnation: Option<u64>,
     /// CR 400.7 + CR 113.7a: Complete event-time authority for a triggered
     /// source. This is recursive across an ability chain and replaces the old
     /// independent incarnation/card-id latches.
@@ -37394,6 +37413,7 @@ impl PartialEq for ResolvedAbility {
             source_id: a_source_id,
             cast_occurrence: a_cast_occurrence,
             source_incarnation: a_source_incarnation,
+            announced_source_incarnation: a_announced_source_incarnation,
             trigger_source: a_trigger_source,
             trigger_definition_ref: a_trigger_definition_ref,
             delayed_origin: a_delayed_origin,
@@ -37469,6 +37489,7 @@ impl PartialEq for ResolvedAbility {
             source_id: b_source_id,
             cast_occurrence: b_cast_occurrence,
             source_incarnation: b_source_incarnation,
+            announced_source_incarnation: b_announced_source_incarnation,
             trigger_source: b_trigger_source,
             trigger_definition_ref: b_trigger_definition_ref,
             delayed_origin: b_delayed_origin,
@@ -37544,6 +37565,7 @@ impl PartialEq for ResolvedAbility {
             && a_source_id == b_source_id
             && a_cast_occurrence == b_cast_occurrence
             && a_source_incarnation == b_source_incarnation
+            && a_announced_source_incarnation == b_announced_source_incarnation
             && a_trigger_source == b_trigger_source
             && a_trigger_definition_ref == b_trigger_definition_ref
             && a_delayed_origin == b_delayed_origin
@@ -37998,6 +38020,7 @@ impl ResolvedAbility {
             target_reads: TargetReadOrigin::OwnAnnouncement,
             sibling_condition: SiblingCondition::Dependent,
             source_incarnation: None,
+            announced_source_incarnation: None,
             trigger_source: None,
             trigger_definition_ref: None,
             delayed_origin: None,
@@ -38417,6 +38440,21 @@ impl ResolvedAbility {
         }
         if let Some(else_branch) = self.else_ability.as_mut() {
             else_branch.set_source_incarnation_recursive(incarnation);
+        }
+    }
+
+    /// CR 400.7 + CR 602.2a: Propagate the source incarnation captured at an
+    /// activation's announcement — before any cost is paid — to this ability
+    /// and every continuation branch. Called only by
+    /// `casting::record_activation_announcement`; stack placement and trigger
+    /// creation never touch it.
+    pub fn set_announced_source_incarnation_recursive(&mut self, incarnation: Option<u64>) {
+        self.announced_source_incarnation = incarnation;
+        if let Some(sub) = self.sub_ability.as_mut() {
+            sub.set_announced_source_incarnation_recursive(incarnation);
+        }
+        if let Some(else_branch) = self.else_ability.as_mut() {
+            else_branch.set_announced_source_incarnation_recursive(incarnation);
         }
     }
 
