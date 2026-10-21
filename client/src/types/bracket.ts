@@ -2,7 +2,6 @@ import type { GameFormat } from "../adapter/types";
 import { formatMetadata } from "../data/formatRegistry";
 import { BRACKET_TIER_NUMERIC, type CommanderBracketTier } from "./bracketEstimate";
 export {
-  BAROMETERS,
   BRACKET_AXES,
   BRACKET_TIER_BY_NUMERIC,
   BRACKET_TIER_NUMERIC,

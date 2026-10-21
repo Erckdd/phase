@@ -34,13 +34,6 @@ export type Barometer =
   | "mass_land_denial"
   | "two_card_combos";
 
-export const BAROMETERS: readonly Barometer[] = [
-  "game_changers",
-  "extra_turns",
-  "mass_land_denial",
-  "two_card_combos",
-];
-
 export type BarometerAuthority = "engine" | "deck_owner" | "unanswered";
 
 export interface ComboBarometer {

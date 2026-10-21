@@ -65,48 +65,19 @@
     "aboutBrackets": "关于分级 ↗",
     "addCommander": "添加指挥官以查看分级估算。",
     "dataVersion": "数据：{{version}}",
-    "estimated": "估算：B{{tier}} {{label}}",
     "estimatedChip": "估算：B{{tier}}",
     "estimatedChipFull": "估算分级：B{{tier}} {{label}}",
-    "hideBreakdown": "隐藏明细",
-    "hideBreakdownButton": "▲ 隐藏明细",
-    "manual": "手动：B{{tier}} {{label}}",
     "manualChip": "B{{tier}}",
     "manualChipFull": "申报分级：B{{tier}} {{label}}",
-    "showBreakdown": "显示明细",
-    "showBreakdownButton": "▼ 显示明细",
     "unavailable": "此版本不提供分级估算。",
-    "belowFloor": " ⚠ 低于 B{{tier}} 下限",
-    "belowFloorCombo": "由二卡组合技抬高",
     "axis": {
       "gameChangers": "改变局势牌",
       "massLandDenial": "大规模地牌破坏",
       "extraTurns": "额外回合",
       "efficientTutors": "高效搜寻"
     },
-    "check": {
-      "fired": "{{observed}} — 强制为 B{{tier}} {{label}}",
-      "clear": "{{observed}} / {{threshold}} — 再多 {{remaining}} 张即达到 B{{tier}}",
-      "clearMax": "{{observed}} — 添加卡牌也无法达到 B{{tier}}",
-      "source": "{{document}}，{{published}}"
-    },
     "combo": {
-      "heading": "二卡组合技",
-      "unmeasured": "此版本未测量二卡组合技指标",
-      "noneFound": "此套牌中未发现二卡无限组合技",
       "attribution": "组合技数据：{{attribution}}，快照 {{date}}",
-      "trigger": {
-        "standaloneTwoCard": "独立二卡组合技下限",
-        "earlyTwoCard": "早期二卡组合技下限（组装费用不超过 {{ceiling}}）"
-      },
-      "check": {
-        "fired": "强制为 B{{tier}} {{label}}",
-        "clear_one": "再添加 1 张牌可能达到 B{{tier}}",
-        "clear_few": "再添加 {{count}} 张牌可能达到 B{{tier}}",
-        "clear_many": "再添加 {{count}} 张牌可能达到 B{{tier}}",
-        "clear_other": "再添加 {{count}} 张牌可能达到 B{{tier}}",
-        "clearMax": "即使有更多匹配也无法达到 B{{tier}}"
-      },
       "outcome": {
         "wins": "赢得游戏",
         "unbounded": "无限{{resource}}"
@@ -121,25 +92,8 @@
         "tokens": "衍生物",
         "combat": "战斗阶段",
         "turns": "回合"
-      },
-      "cardinality": {
-        "definitelyTwoCard": "确定为二卡",
-        "arguablyTwoCard": "可视为二卡",
-        "more": "超过两张牌"
-      },
-      "relevance": {
-        "standalone": "独立",
-        "contextual": "视情况而定",
-        "helper": "辅助"
-      },
-      "pairSourced": "{{first}} + {{second}}（来自组合技表）"
-    },
-    "uncounted": "作为证据计数 — 此轴不适用任何分级规则。",
-    "uncalibrated": "威世智未公布“少量”的具体数字；此计数未经校准。",
-    "coverage": "已读取套牌中 {{counted}} 张牌中的 {{resolved}} 张",
-    "confidencePartial": "有 {{n}} 个卡名未在卡牌数据中找到 — 这些计数为下限。",
-    "unresolvedHeading": "未在卡牌数据中找到",
-    "baseFloor": "分级 1 由套牌主题决定，估算器无法检测。估算从 B2 开始。"
+      }
+    }
   },
   "bracketPicker": {
     "ariaLabel": "套牌分级",
@@ -453,15 +407,6 @@
     "windowAriaLabel": "何时可以组装？",
     "windowUnstated": "未说明",
     "windowEarly": "游戏前期",
-    "windowLate": "仅限游戏后期",
-    "declaredFloor": "（已声明 — 强制为 B{{tier}}）",
-    "heading": "指标",
-    "authorityEngine": "由 phase 检查",
-    "authorityDeckOwner": "由你声明",
-    "authorityUnanswered": "未回答",
-    "rowGameChangers": "改变局势牌",
-    "rowExtraTurns": "额外回合",
-    "rowMassLandDenial": "大规模地牌破坏",
-    "rowTwoCardCombos": "二卡无限组合技"
+    "windowLate": "仅限游戏后期"
   }
 }
