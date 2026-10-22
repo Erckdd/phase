@@ -92,11 +92,12 @@ pub struct BracketReason {
     /// ISO-8601.
     pub source_published: String,
     pub source_url: String,
-    /// Taken together, sufficient to clear this reason.
+    /// Together with the cuts of the other reasons at its step and at the steps above,
+    /// enough to clear this reason.
     pub cuts: Vec<BracketCut>,
 }
 
-/// One change that, with the reason's other cuts, clears it.
+/// One change toward clearing its reason; see `BracketReason::cuts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BracketCut {
