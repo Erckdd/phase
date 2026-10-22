@@ -45,7 +45,9 @@ export function BracketPanelTrack({ tier, declared }: Props) {
             <span
               className={`h-1.5 w-full rounded-full ${filled ? SEGMENT_FILL_CLASS[BRACKET_TIER_BY_NUMERIC[n]] : "bg-white/10"}`}
             />
-            <span className="h-3 leading-3">{estimate === n ? `B${n} ▲` : ""}</span>
+            <span className="h-3 leading-3">
+              {estimate === n ? `${t("bracket.card.tierShort", { tier: n })} ▲` : ""}
+            </span>
           </div>
         );
       })}
