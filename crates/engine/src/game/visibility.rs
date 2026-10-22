@@ -1326,6 +1326,7 @@ fn filter_state_for_scope(state: &GameState, viewer: Option<PlayerId>) -> GameSt
         None => crate::game::payment_transaction::project_without_viewer(state),
     };
     filtered.play_trace = None;
+    filtered.spell_cast_reversal = None;
     let viewer_knows = |object_id: ObjectId| {
         viewer.is_some_and(|viewer| state.viewer_knows_card_identity(viewer, object_id))
     };
@@ -3880,7 +3881,8 @@ fn redact_hidden_zone_change_event(event: &mut GameEvent, hidden_ids: &HashSet<O
 /// `pending_deferred_life_cost_resume`, `pending_triggered_mana_resume`,
 /// `pending_discard_batch`, `resolution_stack` and the other private resume cursors
 /// cleared above, `payment_transaction` (`None` in every projection); not serialized:
-/// `pending_discard_for_cost`, `resolving_player_scope_linked_exile`;
+/// `pending_discard_for_cost`, `resolving_player_scope_tail`,
+/// `resolving_created_token_seats`;
 /// `return_result_frames`, `LogicalZoneChangeGroup` latches and
 /// `ResolvedCommands.zone_change_record` (cleared with `resolution_stack` /
 /// `resolved_rules_journal`), `NamedChoiceSource.context` and `OpponentGuessOwner.context`
@@ -4553,6 +4555,7 @@ fn redact_lki_snapshot(snapshot: &mut crate::types::game_state::LKISnapshot) {
         counters,
         tapped: _,
         is_suspected: _,
+        was_prepared: _,
         attachments,
     } = snapshot;
     *name = HIDDEN_CARD_NAME.to_string();
@@ -7420,6 +7423,9 @@ mod tests {
             deferred_target_selection: false,
             chosen_modes: Vec::new(),
             additional_cost_decided: false,
+            keyword_queue_before_targets: false,
+            alternative_cost_election:
+                crate::types::game_state::SpellAlternativeCostElection::Undecided,
             declared_kickers_to_pay: Vec::new(),
             declined_kickers: Vec::new(),
             convoked_creatures: Vec::new(),
@@ -7482,6 +7488,7 @@ mod tests {
             ability_index: None,
             rules_execution_node: None,
             ability_snapshot: None,
+            announced_source_incarnation: None,
             color_override: None,
             resume: ManaAbilityResume::Priority,
             cost_move_resume: None,
