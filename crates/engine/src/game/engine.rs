@@ -8363,10 +8363,10 @@ fn seed_representative_fodder(
         count: 1,
         copy: Box::new(crate::types::proposed_event::CopyTokenSpec {
             values: Box::new(profile.clone()),
-            display_source: crate::game::game_object::DisplaySource::Token,
-            printed_ref: None,
-            token_image_ref: None,
-            token_art: None,
+            display: crate::game::game_object::DisplayIdentity {
+                display_source: crate::game::game_object::DisplaySource::Token,
+                ..Default::default()
+            },
             extra_keywords: vec![],
             additional_modifications: vec![],
             tapped,
@@ -15024,6 +15024,7 @@ fn apply_non_priority_pass_action(
             WaitingFor::ExertChoice {
                 player,
                 attacker,
+                permission,
                 remaining,
             },
             GameAction::ChooseExert { exert },
@@ -15034,13 +15035,20 @@ fn apply_non_priority_pass_action(
             {
                 return Err(EngineError::NotYourPriority);
             }
+            engine_combat::validate_attack_exert_permission(state, *player, *attacker, permission)?;
             if exert {
-                engine_combat::apply_attack_exert(state, *attacker, &mut events);
+                engine_combat::apply_attack_exert(
+                    state,
+                    *attacker,
+                    permission.clone(),
+                    &mut events,
+                );
             }
             if let Some((next, rest)) = remaining.split_first() {
                 WaitingFor::ExertChoice {
                     player: *player,
-                    attacker: *next,
+                    attacker: next.attacker,
+                    permission: next.permission.clone(),
                     remaining: rest.to_vec(),
                 }
             } else if let Some(waiting_for) =
