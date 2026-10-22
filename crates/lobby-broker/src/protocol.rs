@@ -3460,8 +3460,10 @@ mod tests {
 
     /// The deck carriers' `bracket_tier` is nullable from lobby protocol 17: an
     /// explicit `null` and an omitted field both decode as undeclared, never as a
-    /// declared Core, and a named tier still decodes as declared. A broker below
-    /// 17 rejects the `null` frame outright, which is why the protocol moved.
+    /// declared Core, and a named tier still decodes as declared. The lobby moved
+    /// because `DeckData`'s field type changed. A broker below 17 would reject a
+    /// `null` frame, but no client sends one: `brokerClient` registers and joins
+    /// with an empty, tier-less deck.
     #[test]
     fn deck_carriers_decode_a_null_or_omitted_bracket_tier_as_undeclared() {
         use engine::game::bracket_estimate::CommanderBracketTier;
