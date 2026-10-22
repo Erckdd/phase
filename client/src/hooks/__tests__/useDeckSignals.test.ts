@@ -1,8 +1,8 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ParsedDeck } from "../../services/deckParser";
-import { getDeckSignals } from "../../services/deckSignals";
+import { getDeckSignals, type DeckSignalsOutcome } from "../../services/deckSignals";
 import type { DeckSignals } from "../../types/deckSignals";
 import { clearDeckSignalsCache, useDeckSignals } from "../useDeckSignals";
 
@@ -38,6 +38,23 @@ const baseOptions = {
   commanders: ["Talrand, Sky Summoner"],
   format: "Commander" as const,
 };
+
+const otherDeck: ParsedDeck = { ...deck, main: [{ name: "Brainstorm", count: 2 }] };
+const otherSignals: DeckSignals = { ...signals, nonland_cards: 7 };
+
+/** Longer than the hook's 200ms debounce. */
+const pastDebounce = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 250)));
+
+/** Renders `deck`, waits for its signals to settle, then edits the deck to `otherDeck`. */
+async function settleThenEdit() {
+  const hook = renderHook(({ deck: current }) => useDeckSignals({ ...baseOptions, deck: current }), {
+    initialProps: { deck },
+  });
+  await waitFor(() => expect(hook.result.current.signals).toBe(signals));
+  hook.rerender({ deck: otherDeck });
+  expect(hook.result.current.loading).toBe(true);
+  return hook;
+}
 
 describe("useDeckSignals", () => {
   afterEach(() => {
@@ -78,5 +95,38 @@ describe("useDeckSignals", () => {
       signature_spell: ["Brainstorm"],
       combo_declaration: { kind: "undeclared" },
     });
+  });
+
+  it("restores the settled deck when an edit is undone before its debounce fires", async () => {
+    vi.mocked(getDeckSignals).mockResolvedValue({ kind: "signals", signals });
+    const { result, rerender } = await settleThenEdit();
+
+    rerender({ deck });
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.signals).toBe(signals);
+    expect(result.current.outcome).toEqual({ kind: "signals", signals });
+    await pastDebounce();
+    expect(getDeckSignals).toHaveBeenCalledTimes(1);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("drops an undone edit's in-flight result instead of showing it on the settled deck", async () => {
+    let resolveOther: (outcome: DeckSignalsOutcome) => void = () => {};
+    vi.mocked(getDeckSignals)
+      .mockResolvedValueOnce({ kind: "signals", signals })
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOther = resolve; }));
+    const { result, rerender } = await settleThenEdit();
+    await waitFor(() => expect(getDeckSignals).toHaveBeenCalledTimes(2));
+
+    rerender({ deck });
+    expect(result.current.loading).toBe(false);
+    await act(async () => {
+      resolveOther({ kind: "signals", signals: otherSignals });
+    });
+
+    expect(result.current.signals).toBe(signals);
+    expect(result.current.outcome).toEqual({ kind: "signals", signals });
+    expect(result.current.loading).toBe(false);
   });
 });

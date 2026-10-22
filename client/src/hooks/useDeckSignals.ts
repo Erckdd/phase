@@ -47,7 +47,7 @@ export function useDeckSignals({ deck, commanders, format }: Options): Result {
   const [signals, setSignals] = useState<DeckSignals | null>(null);
   const [loading, setLoading] = useState(false);
   const [outcome, setOutcome] = useState<DeckSignalsOutcome | null>(null);
-  const storedKeyRef = useRef<string | null>(null);
+  const settledRef = useRef<{ key: string; outcome: DeckSignalsOutcome } | null>(null);
   const pendingKeyRef = useRef<string | null>(null);
 
   const eligible = isCommanderFamilyFormat(format) && commanders.length > 0;
@@ -62,11 +62,20 @@ export function useDeckSignals({ deck, commanders, format }: Options): Result {
       setSignals(null);
       setLoading(false);
       setOutcome(null);
-      storedKeyRef.current = null;
+      settledRef.current = null;
       pendingKeyRef.current = null;
       return;
     }
-    if (deckKey === storedKeyRef.current) return;
+    const settled = settledRef.current;
+    if (deckKey === settled?.key) {
+      // Back to the deck already on display (A -> B -> A): drop B's request so its
+      // late result cannot land on A, and restore A's settled state.
+      pendingKeyRef.current = null;
+      setLoading(false);
+      setOutcome(settled.outcome);
+      setSignals(settled.outcome.kind === "signals" ? settled.outcome.signals : null);
+      return;
+    }
 
     pendingKeyRef.current = deckKey;
     setLoading(true);
@@ -86,7 +95,7 @@ export function useDeckSignals({ deck, commanders, format }: Options): Result {
           }),
         );
         if (pendingKeyRef.current !== scheduledKey) return;
-        storedKeyRef.current = scheduledKey;
+        settledRef.current = { key: scheduledKey, outcome: result };
         setOutcome(result);
         setSignals(result.kind === "signals" ? result.signals : null);
       } catch {
