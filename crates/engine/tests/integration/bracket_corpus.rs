@@ -386,20 +386,16 @@ fn precon_distribution_report_is_presence_gated() {
         eprintln!("skipping: client/public/decks.json not generated");
         return;
     }
-    let cards_path = root.join("client/public/card-data.json");
-    if !cards_path.exists() {
-        eprintln!("skipping: client/public/card-data.json not generated");
+    // Precon decks name cards far outside the integration fixture, so this
+    // report reads the whole export through the shared, cached loader.
+    let Some(cards) = crate::support::shared_card_export_json() else {
         return;
-    }
+    };
 
     let decks: BTreeMap<String, Value> = serde_json::from_str(
         &fs::read_to_string(decks_path).expect("generated decks should be readable"),
     )
     .expect("generated decks should be valid JSON");
-    let cards: BTreeMap<String, Value> = serde_json::from_str(
-        &fs::read_to_string(cards_path).expect("generated cards should be readable"),
-    )
-    .expect("generated cards should be valid JSON");
     let mut histograms: BTreeMap<&str, BTreeMap<u64, u64>> = [
         "game_changer",
         "mass_land_denial",

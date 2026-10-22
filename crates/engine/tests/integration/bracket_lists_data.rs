@@ -96,21 +96,12 @@ fn every_wotc_source_has_a_readable_local_copy() {
 
 #[test]
 fn every_curated_name_resolves_in_the_full_card_export() {
-    let export_path = repository_root().join("client/public/card-data.json");
-    if !export_path.exists() {
-        eprintln!(
-            "skipping: full card export is missing at {}; generate it to validate every curated bracket-list name",
-            export_path.display()
-        );
-        return;
-    }
-
     // The committed integration fixture contains only 33 of the 94 curated
-    // names, so this contract deliberately reads the full gitignored export.
-    let export: serde_json::Map<String, serde_json::Value> = serde_json::from_reader(
-        std::fs::File::open(&export_path).expect("full card export should be readable"),
-    )
-    .expect("full card export should contain a JSON object");
+    // names, so this contract reads the whole export through the shared,
+    // cached loader.
+    let Some(export) = crate::support::shared_card_export_json() else {
+        return;
+    };
     let export_names: BTreeSet<String> = export.keys().map(|name| name.to_lowercase()).collect();
     let lists = load_lists();
     let curated_names: Vec<&str> = lists.all_names().collect();
@@ -125,8 +116,7 @@ fn every_curated_name_resolves_in_the_full_card_export() {
         .collect();
     assert!(
         unresolved.is_empty(),
-        "curated bracket-list names missing from {}: {unresolved:#?}",
-        export_path.display()
+        "curated bracket-list names missing from the card export: {unresolved:#?}"
     );
 }
 
